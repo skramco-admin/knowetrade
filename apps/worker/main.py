@@ -100,6 +100,10 @@ def run_once() -> None:
             )
             continue
 
+        if broker.has_open_order(signal.symbol):
+            logger.info("order.open_exists symbol=%s skipping_new_order=true", signal.symbol)
+            continue
+
         allowed, reason = can_place_order(
             symbol=signal.symbol,
             side="BUY",

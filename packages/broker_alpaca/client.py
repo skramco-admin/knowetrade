@@ -5,6 +5,7 @@ import os
 import uuid
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 
@@ -105,3 +106,27 @@ class AlpacaBrokerClient:
             return float(qty)
         except (TypeError, ValueError):
             return 0.0
+
+    def has_open_order(self, symbol: str) -> bool:
+        if self.dry_run:
+            return False
+        query = urlencode(
+            {
+                "status": "open",
+                "symbols": symbol.upper(),
+                "direction": "desc",
+                "limit": "1",
+            }
+        )
+        response = httpx.get(
+            f"{self.base_url}/v2/orders?{query}",
+            headers=self._auth_headers(),
+            timeout=10,
+        )
+        if response.status_code in (401, 403):
+            raise BrokerAuthError(f"Alpaca order-list auth failure (status={response.status_code})")
+        response.raise_for_status()
+        body = response.json()
+        if not isinstance(body, list):
+            return False
+        return any(str(order.get("symbol", "")).upper() == symbol.upper() for order in body)
