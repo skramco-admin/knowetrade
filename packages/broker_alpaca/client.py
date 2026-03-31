@@ -11,6 +11,14 @@ import httpx
 logger = logging.getLogger("knowetrade.broker.alpaca")
 
 
+class BrokerAuthError(Exception):
+    pass
+
+
+class OrderRejectedError(Exception):
+    pass
+
+
 @dataclass(frozen=True)
 class OrderRequest:
     symbol: str
@@ -24,6 +32,29 @@ class AlpacaBrokerClient:
         self.key_id = os.getenv("ALPACA_API_KEY", "")
         self.secret_key = os.getenv("ALPACA_API_SECRET", "")
         self.dry_run = os.getenv("DRY_RUN", "true").lower() == "true"
+
+    def validate_auth(self) -> None:
+        if self.dry_run:
+            logger.info("broker.auth_check.skipped dry_run=true")
+            return
+        if not self.key_id or not self.secret_key:
+            raise BrokerAuthError("Missing Alpaca API credentials")
+        try:
+            response = httpx.get(
+                f"{self.base_url}/v2/account",
+                headers={
+                    "APCA-API-KEY-ID": self.key_id,
+                    "APCA-API-SECRET-KEY": self.secret_key,
+                },
+                timeout=10,
+            )
+            if response.status_code in (401, 403):
+                raise BrokerAuthError(f"Alpaca auth failed (status={response.status_code})")
+            response.raise_for_status()
+        except BrokerAuthError:
+            raise
+        except Exception as exc:
+            raise BrokerAuthError(f"Alpaca auth check failed: {exc}") from exc
 
     def place_order(self, order: OrderRequest) -> dict[str, Any]:
         logger.info("broker.place_order.start symbol=%s qty=%s", order.symbol, order.qty)
@@ -45,7 +76,13 @@ class AlpacaBrokerClient:
             "APCA-API-SECRET-KEY": self.secret_key,
         }
         response = httpx.post(f"{self.base_url}/v2/orders", json=payload, headers=headers, timeout=15)
+        if response.status_code in (401, 403):
+            raise BrokerAuthError(f"Alpaca order auth failure (status={response.status_code})")
+        if 400 <= response.status_code < 500:
+            raise OrderRejectedError(f"Order rejected status={response.status_code} body={response.text}")
         response.raise_for_status()
         body = response.json()
         logger.info("broker.place_order.success id=%s", body.get("id"))
+        if body.get("status") in {"rejected", "canceled", "cancelled"}:
+            raise OrderRejectedError(f"Order rejected by broker status={body.get('status')}")
         return body
