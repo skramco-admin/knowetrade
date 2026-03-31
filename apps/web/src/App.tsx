@@ -16,22 +16,22 @@ export function App() {
         </header>
 
         <nav className="tabs" aria-label="Primary">
-          <NavLink className={({ isActive }) => (isActive ? "tab active" : "tab")} to="/">
+          <NavLink className={({ isActive }: { isActive: boolean }) => (isActive ? "tab active" : "tab")} to="/">
             Dashboard
           </NavLink>
-          <NavLink className={({ isActive }) => (isActive ? "tab active" : "tab")} to="/positions">
+          <NavLink className={({ isActive }: { isActive: boolean }) => (isActive ? "tab active" : "tab")} to="/positions">
             Positions
           </NavLink>
-          <NavLink className={({ isActive }) => (isActive ? "tab active" : "tab")} to="/orders">
+          <NavLink className={({ isActive }: { isActive: boolean }) => (isActive ? "tab active" : "tab")} to="/orders">
             Orders
           </NavLink>
-          <NavLink className={({ isActive }) => (isActive ? "tab active" : "tab")} to="/signals">
+          <NavLink className={({ isActive }: { isActive: boolean }) => (isActive ? "tab active" : "tab")} to="/signals">
             Signals
           </NavLink>
-          <NavLink className={({ isActive }) => (isActive ? "tab active" : "tab")} to="/risk">
+          <NavLink className={({ isActive }: { isActive: boolean }) => (isActive ? "tab active" : "tab")} to="/risk">
             Risk
           </NavLink>
-          <NavLink className={({ isActive }) => (isActive ? "tab active" : "tab")} to="/system-health">
+          <NavLink className={({ isActive }: { isActive: boolean }) => (isActive ? "tab active" : "tab")} to="/system-health">
             System Health
           </NavLink>
         </nav>
