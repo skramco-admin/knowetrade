@@ -90,7 +90,7 @@ def run_once() -> None:
         if signal.action != "BUY":
             continue
 
-        current_qty = get_position_qty(signal.symbol)
+        current_qty = broker.get_position_qty(signal.symbol) if not broker.dry_run else get_position_qty(signal.symbol)
         if current_qty >= target_qty:
             logger.info(
                 "position.target_reached symbol=%s current_qty=%.4f target_qty=%.4f",

@@ -33,6 +33,12 @@ class AlpacaBrokerClient:
         self.secret_key = os.getenv("ALPACA_API_SECRET", "")
         self.dry_run = os.getenv("DRY_RUN", "true").lower() == "true"
 
+    def _auth_headers(self) -> dict[str, str]:
+        return {
+            "APCA-API-KEY-ID": self.key_id,
+            "APCA-API-SECRET-KEY": self.secret_key,
+        }
+
     def validate_auth(self) -> None:
         if self.dry_run:
             logger.info("broker.auth_check.skipped dry_run=true")
@@ -42,10 +48,7 @@ class AlpacaBrokerClient:
         try:
             response = httpx.get(
                 f"{self.base_url}/v2/account",
-                headers={
-                    "APCA-API-KEY-ID": self.key_id,
-                    "APCA-API-SECRET-KEY": self.secret_key,
-                },
+                headers=self._auth_headers(),
                 timeout=10,
             )
             if response.status_code in (401, 403):
@@ -71,11 +74,7 @@ class AlpacaBrokerClient:
             "type": "market",
             "time_in_force": "day",
         }
-        headers = {
-            "APCA-API-KEY-ID": self.key_id,
-            "APCA-API-SECRET-KEY": self.secret_key,
-        }
-        response = httpx.post(f"{self.base_url}/v2/orders", json=payload, headers=headers, timeout=15)
+        response = httpx.post(f"{self.base_url}/v2/orders", json=payload, headers=self._auth_headers(), timeout=15)
         if response.status_code in (401, 403):
             raise BrokerAuthError(f"Alpaca order auth failure (status={response.status_code})")
         if 400 <= response.status_code < 500:
@@ -86,3 +85,23 @@ class AlpacaBrokerClient:
         if body.get("status") in {"rejected", "canceled", "cancelled"}:
             raise OrderRejectedError(f"Order rejected by broker status={body.get('status')}")
         return body
+
+    def get_position_qty(self, symbol: str) -> float:
+        if self.dry_run:
+            return 0.0
+        response = httpx.get(
+            f"{self.base_url}/v2/positions/{symbol.upper()}",
+            headers=self._auth_headers(),
+            timeout=10,
+        )
+        if response.status_code == 404:
+            return 0.0
+        if response.status_code in (401, 403):
+            raise BrokerAuthError(f"Alpaca position auth failure (status={response.status_code})")
+        response.raise_for_status()
+        body = response.json()
+        qty = body.get("qty", 0)
+        try:
+            return float(qty)
+        except (TypeError, ValueError):
+            return 0.0
