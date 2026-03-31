@@ -9,7 +9,15 @@ import httpx
 logger = logging.getLogger("knowetrade.alerts")
 
 
+def _alerts_enabled() -> bool:
+    return os.getenv("SLACK_ALERTS_ENABLED", "true").strip().lower() == "true"
+
+
 def _post_to_slack(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
+    if not _alerts_enabled():
+        logger.info("slack.disabled_via_flag message=%s", text)
+        return
+
     webhook = os.getenv("SLACK_WEBHOOK_URL", "").strip()
     if not webhook:
         logger.info("slack.disabled message=%s", text)

@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from packages.db.models import Base, JobRun, Order, Position, RiskEvent
@@ -46,6 +46,15 @@ def list_positions(limit: int = 100) -> list[dict[str, Any]]:
             }
             for row in rows
         ]
+
+
+def get_position_qty(symbol: str) -> float:
+    init_database()
+    with db_session() as session:
+        qty = session.execute(
+            select(func.coalesce(func.sum(Position.qty), 0.0)).where(Position.symbol == symbol.upper())
+        ).scalar_one()
+        return float(qty)
 
 
 def list_job_runs(limit: int = 100) -> list[dict[str, Any]]:

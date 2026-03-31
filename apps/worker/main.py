@@ -15,6 +15,7 @@ from packages.broker_alpaca.client import (
 from packages.core.risk import RiskConfig, can_place_order
 from packages.core.strategy import Signal, generate_signals
 from packages.db.helpers import (
+    get_position_qty,
     init_database,
     log_job_run,
     record_order_and_position,
@@ -26,6 +27,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 logger = logging.getLogger("knowetrade.worker")
+_last_summary_sent_at: datetime | None = None
 
 
 def _symbols_from_env() -> list[str]:
@@ -44,6 +46,26 @@ def _check_daily_loss_threshold() -> None:
         )
 
 
+def _target_position_qty_per_symbol() -> float:
+    return float(os.getenv("TARGET_POSITION_QTY_PER_SYMBOL", "1"))
+
+
+def _should_send_summary(now: datetime) -> bool:
+    global _last_summary_sent_at
+    interval_minutes = int(os.getenv("SUMMARY_INTERVAL_MINUTES", "1440"))
+    if interval_minutes <= 0:
+        _last_summary_sent_at = now
+        return True
+    if _last_summary_sent_at is None:
+        _last_summary_sent_at = now
+        return True
+    elapsed_seconds = (now - _last_summary_sent_at).total_seconds()
+    if elapsed_seconds >= interval_minutes * 60:
+        _last_summary_sent_at = now
+        return True
+    return False
+
+
 def run_once() -> None:
     init_database()
     started_at = datetime.now(timezone.utc)
@@ -56,6 +78,7 @@ def run_once() -> None:
     risk = RiskConfig(max_position_notional_usd=float(os.getenv("MAX_POSITION_NOTIONAL_USD", "10000")))
     placed_orders = 0
     order_rejections = 0
+    target_qty = _target_position_qty_per_symbol()
 
     try:
         broker.validate_auth()
@@ -65,6 +88,16 @@ def run_once() -> None:
 
     for signal in signals:
         if signal.action != "BUY":
+            continue
+
+        current_qty = get_position_qty(signal.symbol)
+        if current_qty >= target_qty:
+            logger.info(
+                "position.target_reached symbol=%s current_qty=%.4f target_qty=%.4f",
+                signal.symbol,
+                current_qty,
+                target_qty,
+            )
             continue
 
         allowed, reason = can_place_order(
@@ -106,15 +139,16 @@ def run_once() -> None:
 
     _check_daily_loss_threshold()
 
-    sendDailySummary(
-        [
-            f"job=strategy_cycle",
-            f"symbols={len(symbols)}",
-            f"signals={len(signals)}",
-            f"placed_orders={placed_orders}",
-            f"order_rejections={order_rejections}",
-        ]
-    )
+    if _should_send_summary(now=datetime.now(timezone.utc)):
+        sendDailySummary(
+            [
+                f"job=strategy_cycle",
+                f"symbols={len(symbols)}",
+                f"signals={len(signals)}",
+                f"placed_orders={placed_orders}",
+                f"order_rejections={order_rejections}",
+            ]
+        )
 
     log_job_run(job_name="strategy_cycle", status="success", started_at=started_at)
     logger.info("job.end strategy_cycle status=success")
@@ -129,6 +163,15 @@ def main() -> None:
             logger.exception("job.failed strategy_cycle")
             sendCriticalAlert("Job failure", f"KnoweTrade worker failed: {exc}")
         time.sleep(poll_seconds)
+
+
+def main_once() -> None:
+    try:
+        run_once()
+    except Exception as exc:  # pragma: no cover - scaffold error path
+        logger.exception("job.failed strategy_cycle")
+        sendCriticalAlert("Job failure", f"KnoweTrade worker failed: {exc}")
+        raise
 
 
 if __name__ == "__main__":
