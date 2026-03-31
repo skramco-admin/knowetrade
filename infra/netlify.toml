@@ -6,6 +6,8 @@
 [build.environment]
   NODE_VERSION = "20"
   VITE_API_BASE_URL = "/api"
+  NPM_FLAGS = "--include=optional"
+  NPM_CONFIG_INCLUDE = "optional"
 
 [[redirects]]
   from = "/api/*"
