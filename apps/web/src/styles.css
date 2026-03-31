@@ -10,9 +10,39 @@ body {
 }
 
 .container {
-  max-width: 840px;
+  max-width: 1000px;
   margin: 0 auto;
   padding: 2rem 1rem;
+}
+
+.page-header h1 {
+  margin: 0 0 0.25rem;
+}
+
+.page-header p {
+  margin-top: 0;
+  color: #d1d5db;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.tab {
+  text-decoration: none;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: 999px;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.9rem;
+}
+
+.tab.active {
+  background: #2563eb;
+  border-color: #2563eb;
 }
 
 .card {
@@ -25,4 +55,45 @@ body {
 
 .error {
   color: #fca5a5;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem;
+}
+
+.metric {
+  border: 1px solid #374151;
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  background: #111827;
+}
+
+.metric h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #d1d5db;
+}
+
+.metric p {
+  margin: 0.4rem 0 0;
+  font-size: 1.2rem;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  border-bottom: 1px solid #374151;
+  text-align: left;
+  padding: 0.5rem;
+}
+
+.list {
+  padding-left: 1.1rem;
+  margin: 0;
 }
