@@ -7,6 +7,8 @@ services:
     startCommand: uvicorn apps.api.main:app --host 0.0.0.0 --port $PORT
     autoDeploy: true
     envVars:
+      - key: PORT
+        value: "10000"
       - key: DATABASE_URL
         sync: false
       - key: ADMIN_API_KEY
@@ -19,6 +21,7 @@ services:
     runtime: python
     plan: starter
     buildCommand: pip install -r apps/worker/requirements.txt
+    # Placeholder: replace with your long-running worker entrypoint.
     startCommand: python -m apps.worker.main
     autoDeploy: true
     envVars:
@@ -34,6 +37,46 @@ services:
         value: SPY,QQQ,IVV,VTI
       - key: DRY_RUN
         value: "true"
+      - key: MAX_POSITION_NOTIONAL_USD
+        value: "10000"
+      - key: WORKER_POLL_SECONDS
+        value: "60"
+
+  - type: cron
+    name: knowetrade-premarket
+    runtime: python
+    plan: starter
+    schedule: "30 13 * * 1-5"
+    buildCommand: pip install -r apps/worker/requirements.txt
+    # Placeholder: replace with premarket preparation job.
+    startCommand: python -c "print('placeholder premarket job')"
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_API_SECRET
+        sync: false
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: DRY_RUN
+        value: "true"
+
+  - type: cron
+    name: knowetrade-postclose
+    runtime: python
+    plan: starter
+    schedule: "30 21 * * 1-5"
+    buildCommand: pip install -r apps/worker/requirements.txt
+    # Placeholder: replace with postclose snapshot/reporting job.
+    startCommand: python -c "print('placeholder postclose job')"
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: DRY_RUN
+        value: "true"
 
   - type: cron
     name: knowetrade-reconcile
@@ -41,7 +84,16 @@ services:
     plan: starter
     schedule: "*/30 * * * *"
     buildCommand: pip install -r apps/worker/requirements.txt
-    startCommand: python -c "from apps.worker.main import run_once; run_once()"
+    # Placeholder: replace with reconciliation job entrypoint.
+    startCommand: python -c "print('placeholder reconcile job')"
     envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_API_SECRET
+        sync: false
+      - key: SLACK_WEBHOOK_URL
+        sync: false
       - key: DRY_RUN
         value: "true"
