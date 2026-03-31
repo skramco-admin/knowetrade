@@ -95,10 +95,26 @@ def record_order_and_position(order_id: str, symbol: str, qty: int) -> None:
                 status="accepted",
             )
         )
-        session.add(
-            Position(
-                symbol=symbol,
-                qty=float(qty),
-                avg_price=100.0,
+        existing = session.execute(select(Position).where(Position.symbol == symbol)).scalar_one_or_none()
+        if existing is None:
+            session.add(
+                Position(
+                    symbol=symbol,
+                    qty=float(qty),
+                    avg_price=100.0,
+                    updated_at=datetime.now(timezone.utc),
+                )
             )
-        )
+            return
+
+        # Basic long-only weighted-average position update for scaffold behavior.
+        fill_qty = float(qty)
+        fill_price = 100.0
+        total_qty = float(existing.qty) + fill_qty
+        if total_qty <= 0:
+            existing.qty = 0.0
+            existing.avg_price = 0.0
+        else:
+            existing.avg_price = ((float(existing.qty) * float(existing.avg_price)) + (fill_qty * fill_price)) / total_qty
+            existing.qty = total_qty
+        existing.updated_at = datetime.now(timezone.utc)
