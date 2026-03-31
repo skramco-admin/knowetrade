@@ -1,0 +1,15 @@
+{
+  "name": "knowetrade",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "install:web": "npm --prefix apps/web install",
+    "dev:web": "npm --prefix apps/web run dev",
+    "build:web": "npm --prefix apps/web run build",
+    "dev:api": ".venv\\Scripts\\python.exe -m uvicorn apps.api.main:app --reload --port 8000",
+    "dev:worker": ".venv\\Scripts\\python.exe -m apps.worker.main"
+  }
+}

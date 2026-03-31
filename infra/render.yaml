@@ -1,0 +1,47 @@
+services:
+  - type: web
+    name: knowetrade-api
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r apps/api/requirements.txt
+    startCommand: uvicorn apps.api.main:app --host 0.0.0.0 --port $PORT
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: ADMIN_API_KEY
+        sync: false
+      - key: LOG_LEVEL
+        value: INFO
+
+  - type: worker
+    name: knowetrade-worker
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r apps/worker/requirements.txt
+    startCommand: python -m apps.worker.main
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_API_SECRET
+        sync: false
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: TRADING_SYMBOLS
+        value: SPY,QQQ,IVV,VTI
+      - key: DRY_RUN
+        value: "true"
+
+  - type: cron
+    name: knowetrade-reconcile
+    runtime: python
+    plan: starter
+    schedule: "*/30 * * * *"
+    buildCommand: pip install -r apps/worker/requirements.txt
+    startCommand: python -c "from apps.worker.main import run_once; run_once()"
+    envVars:
+      - key: DRY_RUN
+        value: "true"

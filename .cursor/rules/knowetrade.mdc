@@ -1,0 +1,24 @@
+---
+description: KnoweTrade project conventions
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# KnoweTrade Conventions
+
+Follow these conventions:
+
+- Backend: Python + FastAPI
+- Frontend: React + TypeScript
+- Database: Postgres
+- Infra configs must live in `/infra` or repo root as appropriate
+- Prefer explicit types
+- Add logging around broker calls and job boundaries
+- Never remove risk checks without replacing them
+- For each feature, include:
+  - code
+  - config
+  - env vars
+  - tests where reasonable
+  - README updates
