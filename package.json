@@ -11,5 +11,8 @@
     "build:web": "npm --prefix apps/web run build",
     "dev:api": ".venv\\Scripts\\python.exe -m uvicorn apps.api.main:app --reload --port 8000",
     "dev:worker": ".venv\\Scripts\\python.exe -m apps.worker.main"
+  },
+  "devDependencies": {
+    "supabase": "^2.84.5"
   }
 }

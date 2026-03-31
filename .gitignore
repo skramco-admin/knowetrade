@@ -23,6 +23,7 @@ pnpm-debug.log*
 .env.local
 .env.*.local
 knowetrade.db
+supabase/.temp/
 
 # OS / editor files
 .DS_Store
