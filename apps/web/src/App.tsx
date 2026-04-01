@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { BrowserRouter, NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { prefetchCoreViews } from "./api";
 import { DashboardPage } from "./pages/DashboardPage";
 import { JobRunsPage } from "./pages/JobRunsPage";
 import { OrdersPage } from "./pages/OrdersPage";
@@ -10,6 +12,12 @@ import { SymbolsPage } from "./pages/SymbolsPage";
 import { SystemHealthPage } from "./pages/SystemHealthPage";
 
 export function App() {
+  useEffect(() => {
+    prefetchCoreViews().catch(() => {
+      // Prefetch is best-effort to speed up first tab navigation.
+    });
+  }, []);
+
   return (
     <BrowserRouter>
       <main className="container">

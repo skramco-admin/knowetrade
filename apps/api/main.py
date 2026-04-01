@@ -129,6 +129,12 @@ def proposed_orders() -> list[dict[str, Any]]:
     return list_proposed_orders(limit=500)
 
 
+@app.get("/account-metrics")
+def account_metrics() -> dict[str, Any]:
+    client = AlpacaBrokerClient()
+    return client.get_account_metrics()
+
+
 @app.post("/admin/paper-trading/enable")
 def enable_paper_trading(x_admin_key: str | None = Header(default=None)) -> dict[str, Any]:
     _require_admin_key(x_admin_key)

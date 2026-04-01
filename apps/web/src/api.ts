@@ -76,6 +76,16 @@ export type DashboardSummary = {
   proposedOrders: number;
 };
 
+export type AccountMetrics = {
+  status: string;
+  cash: number;
+  buying_power: number;
+  equity: number;
+  last_equity: number;
+  day_pnl: number;
+  day_pnl_pct: number;
+};
+
 export type SymbolRow = {
   ticker: string;
   asset_class: string;
@@ -86,18 +96,40 @@ export type SymbolRow = {
 // Frontend is API-only by design. Broker endpoints are never called here.
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const ADMIN_API_KEY = import.meta.env.VITE_ADMIN_API_KEY ?? "";
+const DEFAULT_TTL_MS = 30_000;
+const responseCache = new Map<string, { expiresAt: number; data: unknown }>();
+const inflight = new Map<string, Promise<unknown>>();
 
-async function fetchApi<T>(path: string): Promise<T> {
+async function fetchApi<T>(path: string, ttlMs = DEFAULT_TTL_MS): Promise<T> {
+  const now = Date.now();
+  const cached = responseCache.get(path);
+  if (cached && cached.expiresAt > now) {
+    return cached.data as T;
+  }
+  const pending = inflight.get(path);
+  if (pending) {
+    return (await pending) as T;
+  }
+
   const headers: Record<string, string> = {};
   if (ADMIN_API_KEY) {
     headers["x-admin-key"] = ADMIN_API_KEY;
   }
-
-  const response = await fetch(`${API_BASE_URL}${path}`, { headers });
-  if (!response.ok) {
-    throw new Error(`API request failed: ${path} (${response.status})`);
+  const request = (async () => {
+    const response = await fetch(`${API_BASE_URL}${path}`, { headers });
+    if (!response.ok) {
+      throw new Error(`API request failed: ${path} (${response.status})`);
+    }
+    const body = (await response.json()) as T;
+    responseCache.set(path, { expiresAt: now + ttlMs, data: body });
+    return body;
+  })();
+  inflight.set(path, request);
+  try {
+    return await request;
+  } finally {
+    inflight.delete(path);
   }
-  return (await response.json()) as T;
 }
 
 function activeEtfTrendSymbols(symbols: SymbolRow[]): SymbolRow[] {
@@ -110,11 +142,11 @@ function activeEtfTrendSymbols(symbols: SymbolRow[]): SymbolRow[] {
 }
 
 export async function getSymbols(): Promise<SymbolRow[]> {
-  return fetchApi<SymbolRow[]>("/symbols");
+  return fetchApi<SymbolRow[]>("/symbols", 5 * 60_000);
 }
 
 export async function getSystemHealth(): Promise<SystemHealth> {
-  const [symbols, deps] = await Promise.all([getSymbols(), fetchApi<Record<string, unknown>>("/health/deps")]);
+  const [symbols, deps] = await Promise.all([getSymbols(), fetchApi<Record<string, unknown>>("/health/deps", 10_000)]);
   const monitored = activeEtfTrendSymbols(symbols);
   return {
     status: String(deps.status ?? "unknown"),
@@ -131,27 +163,31 @@ export async function getSystemHealth(): Promise<SystemHealth> {
 }
 
 export async function getPositions(): Promise<Position[]> {
-  return fetchApi<Position[]>("/positions");
+  return fetchApi<Position[]>("/positions", 20_000);
 }
 
 export async function getOrders(): Promise<Order[]> {
-  return fetchApi<Order[]>("/orders");
+  return fetchApi<Order[]>("/orders", 20_000);
 }
 
 export async function getSignals(): Promise<Signal[]> {
-  return fetchApi<Signal[]>("/signals");
+  return fetchApi<Signal[]>("/signals", 20_000);
 }
 
 export async function getRiskEvents(): Promise<RiskEvent[]> {
-  return fetchApi<RiskEvent[]>("/risk-events");
+  return fetchApi<RiskEvent[]>("/risk-events", 20_000);
 }
 
 export async function getJobRuns(): Promise<JobRun[]> {
-  return fetchApi<JobRun[]>("/job-runs");
+  return fetchApi<JobRun[]>("/job-runs", 20_000);
 }
 
 export async function getProposedOrders(): Promise<ProposedOrder[]> {
-  return fetchApi<ProposedOrder[]>("/proposed-orders");
+  return fetchApi<ProposedOrder[]>("/proposed-orders", 20_000);
+}
+
+export async function getAccountMetrics(): Promise<AccountMetrics> {
+  return fetchApi<AccountMetrics>("/account-metrics", 15_000);
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
@@ -175,4 +211,19 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
     recentJobRuns: jobRuns.length,
     proposedOrders: proposedOrders.length,
   };
+}
+
+export async function prefetchCoreViews(): Promise<void> {
+  await Promise.allSettled([
+    getDashboardSummary(),
+    getSystemHealth(),
+    getPositions(),
+    getOrders(),
+    getSignals(),
+    getRiskEvents(),
+    getProposedOrders(),
+    getJobRuns(),
+    getSymbols(),
+    getAccountMetrics(),
+  ]);
 }

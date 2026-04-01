@@ -112,6 +112,31 @@ class AlpacaBrokerClient:
         if "paper-api.alpaca.markets" not in self.base_url:
             raise BrokerAuthError("Order submission is allowed only to Alpaca paper endpoint")
 
+    def get_account_metrics(self) -> dict[str, float | str]:
+        self._ensure_credentials()
+        response = httpx.get(
+            f"{self.base_url}/v2/account",
+            headers=self._auth_headers(),
+            timeout=15,
+        )
+        if response.status_code in (401, 403):
+            raise BrokerAuthError(f"Alpaca account auth failure (status={response.status_code})")
+        response.raise_for_status()
+        body = response.json()
+        equity = float(body.get("equity", 0) or 0)
+        last_equity = float(body.get("last_equity", 0) or 0)
+        day_pnl = equity - last_equity
+        day_pnl_pct = (day_pnl / last_equity) if last_equity > 0 else 0.0
+        return {
+            "status": str(body.get("status", "")),
+            "cash": float(body.get("cash", 0) or 0),
+            "buying_power": float(body.get("buying_power", 0) or 0),
+            "equity": equity,
+            "last_equity": last_equity,
+            "day_pnl": day_pnl,
+            "day_pnl_pct": day_pnl_pct,
+        }
+
     def place_order(self, order: OrderRequest) -> dict[str, Any]:
         logger.info("broker.place_order.start symbol=%s qty=%s", order.symbol, order.qty)
 
