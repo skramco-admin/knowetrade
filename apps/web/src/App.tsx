@@ -1,9 +1,12 @@
 import { BrowserRouter, NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { DashboardPage } from "./pages/DashboardPage";
+import { JobRunsPage } from "./pages/JobRunsPage";
 import { OrdersPage } from "./pages/OrdersPage";
 import { PositionsPage } from "./pages/PositionsPage";
+import { ProposedOrdersPage } from "./pages/ProposedOrdersPage";
 import { RiskPage } from "./pages/RiskPage";
 import { SignalsPage } from "./pages/SignalsPage";
+import { SymbolsPage } from "./pages/SymbolsPage";
 import { SystemHealthPage } from "./pages/SystemHealthPage";
 
 export function App() {
@@ -31,6 +34,15 @@ export function App() {
           <NavLink className={({ isActive }: { isActive: boolean }) => (isActive ? "tab active" : "tab")} to="/risk">
             Risk
           </NavLink>
+          <NavLink className={({ isActive }: { isActive: boolean }) => (isActive ? "tab active" : "tab")} to="/proposed-orders">
+            Proposed Orders
+          </NavLink>
+          <NavLink className={({ isActive }: { isActive: boolean }) => (isActive ? "tab active" : "tab")} to="/job-runs">
+            Job Runs
+          </NavLink>
+          <NavLink className={({ isActive }: { isActive: boolean }) => (isActive ? "tab active" : "tab")} to="/symbols">
+            ETF Universe
+          </NavLink>
           <NavLink className={({ isActive }: { isActive: boolean }) => (isActive ? "tab active" : "tab")} to="/system-health">
             System Health
           </NavLink>
@@ -42,6 +54,9 @@ export function App() {
           <Route path="/orders" element={<OrdersPage />} />
           <Route path="/signals" element={<SignalsPage />} />
           <Route path="/risk" element={<RiskPage />} />
+          <Route path="/proposed-orders" element={<ProposedOrdersPage />} />
+          <Route path="/job-runs" element={<JobRunsPage />} />
+          <Route path="/symbols" element={<SymbolsPage />} />
           <Route path="/system-health" element={<SystemHealthPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

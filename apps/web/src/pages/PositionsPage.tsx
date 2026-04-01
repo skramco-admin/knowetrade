@@ -3,14 +3,18 @@ import { getPositions, type Position } from "../api";
 
 export function PositionsPage() {
   const [positions, setPositions] = useState<Position[]>([]);
+  const [error, setError] = useState<string>("");
 
   useEffect(() => {
-    getPositions().then(setPositions);
+    getPositions()
+      .then(setPositions)
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load positions"));
   }, []);
 
   return (
     <section className="card">
       <h2>Positions</h2>
+      {error ? <p role="alert">API error: {error}</p> : null}
       <table className="table">
         <thead>
           <tr>

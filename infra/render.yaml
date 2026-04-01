@@ -31,16 +31,30 @@ services:
         sync: false
       - key: ALPACA_API_SECRET
         sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: ALPACA_BASE_URL
+        value: https://paper-api.alpaca.markets
+      - key: ALPACA_DATA_BASE_URL
+        value: https://data.alpaca.markets
       - key: SLACK_WEBHOOK_URL
         sync: false
-      - key: TRADING_SYMBOLS
-        value: SPY,QQQ,IVV,VTI
-      - key: DRY_RUN
+      - key: APP_MODE
+        value: paper
+      - key: TRADING_ENABLED
         value: "true"
-      - key: MAX_POSITION_NOTIONAL_USD
-        value: "10000"
+      - key: ENABLE_ORDER_SUBMISSION
+        value: "false"
+      - key: MAX_OPEN_POSITIONS
+        value: "5"
+      - key: MAX_POSITION_PCT
+        value: "0.20"
+      - key: DRY_RUN
+        value: "false"
+      - key: WORKER_JOB_NAME
+        value: daily_summary
       - key: WORKER_POLL_SECONDS
-        value: "60"
+        value: "3600"
 
   - type: cron
     name: knowetrade-premarket
@@ -48,8 +62,7 @@ services:
     plan: starter
     schedule: "30 13 * * 1-5"
     buildCommand: pip install -r apps/worker/requirements.txt
-    # Placeholder: replace with premarket preparation job.
-    startCommand: python -c "print('placeholder premarket job')"
+    startCommand: python -c "from apps.worker.main import run_premarket_health_check_job; run_premarket_health_check_job()"
     envVars:
       - key: DATABASE_URL
         sync: false
@@ -57,35 +70,28 @@ services:
         sync: false
       - key: ALPACA_API_SECRET
         sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: ALPACA_BASE_URL
+        value: https://paper-api.alpaca.markets
       - key: SLACK_WEBHOOK_URL
         sync: false
-      - key: DRY_RUN
+      - key: APP_MODE
+        value: paper
+      - key: TRADING_ENABLED
         value: "true"
+      - key: ENABLE_ORDER_SUBMISSION
+        value: "false"
+      - key: WORKER_JOB_NAME
+        value: premarket_health_check
 
   - type: cron
     name: knowetrade-postclose
     runtime: python
     plan: starter
-    schedule: "30 21 * * 1-5"
+    schedule: "30 20 * * 1-5"
     buildCommand: pip install -r apps/worker/requirements.txt
-    # Placeholder: replace with postclose snapshot/reporting job.
-    startCommand: python -c "print('placeholder postclose job')"
-    envVars:
-      - key: DATABASE_URL
-        sync: false
-      - key: SLACK_WEBHOOK_URL
-        sync: false
-      - key: DRY_RUN
-        value: "true"
-
-  - type: cron
-    name: knowetrade-reconcile
-    runtime: python
-    plan: starter
-    schedule: "*/30 * * * *"
-    buildCommand: pip install -r apps/worker/requirements.txt
-    # Placeholder: replace with reconciliation job entrypoint.
-    startCommand: python -c "print('placeholder reconcile job')"
+    startCommand: python -c "from apps.worker.main import run_postclose_workflow_job; run_postclose_workflow_job()"
     envVars:
       - key: DATABASE_URL
         sync: false
@@ -93,7 +99,94 @@ services:
         sync: false
       - key: ALPACA_API_SECRET
         sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: ALPACA_BASE_URL
+        value: https://paper-api.alpaca.markets
+      - key: ALPACA_DATA_BASE_URL
+        value: https://data.alpaca.markets
       - key: SLACK_WEBHOOK_URL
         sync: false
-      - key: DRY_RUN
+      - key: APP_MODE
+        value: paper
+      - key: TRADING_ENABLED
         value: "true"
+      - key: ENABLE_ORDER_SUBMISSION
+        value: "false"
+      - key: WORKER_JOB_NAME
+        value: daily_postclose_workflow
+
+  - type: cron
+    name: knowetrade-order-submit
+    runtime: python
+    plan: starter
+    schedule: "40 20 * * 1-5"
+    buildCommand: pip install -r apps/worker/requirements.txt
+    startCommand: python -c "from apps.worker.main import run_paper_order_execution_job; run_paper_order_execution_job()"
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_API_SECRET
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: ALPACA_BASE_URL
+        value: https://paper-api.alpaca.markets
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: APP_MODE
+        value: paper
+      - key: TRADING_ENABLED
+        value: "true"
+      - key: ENABLE_ORDER_SUBMISSION
+        sync: false
+      - key: WORKER_JOB_NAME
+        value: paper_order_execution
+
+  - type: cron
+    name: knowetrade-reconcile
+    runtime: python
+    plan: starter
+    schedule: "00 21 * * 1-5"
+    buildCommand: pip install -r apps/worker/requirements.txt
+    startCommand: python -c "from apps.worker.main import run_reconciliation_job; run_reconciliation_job()"
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_API_SECRET
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: ALPACA_BASE_URL
+        value: https://paper-api.alpaca.markets
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: APP_MODE
+        value: paper
+      - key: TRADING_ENABLED
+        value: "true"
+      - key: ENABLE_ORDER_SUBMISSION
+        value: "false"
+      - key: WORKER_JOB_NAME
+        value: daily_reconciliation
+
+  - type: cron
+    name: knowetrade-daily-summary
+    runtime: python
+    plan: starter
+    schedule: "15 21 * * 1-5"
+    buildCommand: pip install -r apps/worker/requirements.txt
+    startCommand: python -c "from apps.worker.main import run_daily_summary_job; run_daily_summary_job()"
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: APP_MODE
+        value: paper
+      - key: WORKER_JOB_NAME
+        value: daily_summary

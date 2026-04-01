@@ -12,14 +12,19 @@ export type Order = {
   qty: number;
   side: string;
   status: string;
+  order_type?: string;
+  submitted_at?: string;
+  filled_at?: string;
+  updated_at?: string;
   created_at?: string;
 };
 
 export type Signal = {
   id: number;
   symbol: string;
-  signal_type: string;
+  signal: string;
   strength: number;
+  reason?: string;
   signal_time?: string;
 };
 
@@ -33,8 +38,32 @@ export type RiskEvent = {
 
 export type SystemHealth = {
   status: string;
-  source: string;
   checked_at: string;
+  active_etf_symbols: number;
+  monitored_tickers: string[];
+  app_mode?: string;
+  database_ok?: boolean;
+  alpaca_paper_endpoint?: boolean;
+  alpaca_auth_ok?: boolean;
+  trading_enabled?: boolean;
+  enable_order_submission?: boolean;
+};
+
+export type JobRun = {
+  id: number;
+  job_name: string;
+  status: string;
+  started_at?: string;
+  created_at?: string;
+};
+
+export type ProposedOrder = {
+  id: number;
+  symbol: string;
+  action: string;
+  target_weight: number;
+  reason?: string;
+  created_at?: string;
 };
 
 export type DashboardSummary = {
@@ -42,6 +71,16 @@ export type DashboardSummary = {
   openOrders: number;
   latestSignals: number;
   recentRiskEvents: number;
+  activeEtfSymbols: number;
+  recentJobRuns: number;
+  proposedOrders: number;
+};
+
+export type SymbolRow = {
+  ticker: string;
+  asset_class: string;
+  strategy_bucket: string;
+  is_active: boolean;
 };
 
 // Frontend is API-only by design. Broker endpoints are never called here.
@@ -61,91 +100,79 @@ async function fetchApi<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-const placeholderPositions: Position[] = [
-  { id: 1, symbol: "SPY", qty: 4, avg_price: 522.14, updated_at: "2026-03-31T13:55:00Z" },
-  { id: 2, symbol: "QQQ", qty: 2, avg_price: 441.62, updated_at: "2026-03-31T13:55:00Z" },
-];
+function activeEtfTrendSymbols(symbols: SymbolRow[]): SymbolRow[] {
+  return symbols.filter(
+    (symbol) =>
+      symbol.is_active &&
+      symbol.asset_class.toUpperCase() === "ETF" &&
+      symbol.strategy_bucket === "etf_trend",
+  );
+}
 
-const placeholderOrders: Order[] = [
-  { id: 101, symbol: "IVV", qty: 1, side: "buy", status: "accepted", created_at: "2026-03-31T13:30:00Z" },
-  { id: 102, symbol: "VTI", qty: 1, side: "buy", status: "filled", created_at: "2026-03-31T13:32:00Z" },
-];
-
-const placeholderSignals: Signal[] = [
-  { id: 201, symbol: "SPY", signal_type: "momentum_buy", strength: 0.74, signal_time: "2026-03-31T13:20:00Z" },
-  { id: 202, symbol: "QQQ", signal_type: "mean_revert_buy", strength: 0.61, signal_time: "2026-03-31T13:21:00Z" },
-];
-
-const placeholderRiskEvents: RiskEvent[] = [
-  {
-    id: 301,
-    symbol: "XLK",
-    severity: "warning",
-    reason: "Order blocked by max notional rule",
-    event_time: "2026-03-31T13:26:00Z",
-  },
-];
+export async function getSymbols(): Promise<SymbolRow[]> {
+  return fetchApi<SymbolRow[]>("/symbols");
+}
 
 export async function getSystemHealth(): Promise<SystemHealth> {
-  try {
-    const response = await fetchApi<{ status: string }>("/health");
-    return {
-      status: response.status,
-      source: "api",
-      checked_at: new Date().toISOString(),
-    };
-  } catch {
-    return {
-      status: "degraded",
-      source: "placeholder",
-      checked_at: new Date().toISOString(),
-    };
-  }
+  const [symbols, deps] = await Promise.all([getSymbols(), fetchApi<Record<string, unknown>>("/health/deps")]);
+  const monitored = activeEtfTrendSymbols(symbols);
+  return {
+    status: String(deps.status ?? "unknown"),
+    checked_at: new Date().toISOString(),
+    active_etf_symbols: monitored.length,
+    monitored_tickers: monitored.map((symbol) => symbol.ticker),
+    app_mode: String(deps.app_mode ?? ""),
+    database_ok: Boolean(deps.database_ok),
+    alpaca_paper_endpoint: Boolean(deps.alpaca_paper_endpoint),
+    alpaca_auth_ok: Boolean(deps.alpaca_auth_ok),
+    trading_enabled: Boolean(deps.trading_enabled),
+    enable_order_submission: Boolean(deps.enable_order_submission),
+  };
 }
 
 export async function getPositions(): Promise<Position[]> {
-  try {
-    return await fetchApi<Position[]>("/admin/positions");
-  } catch {
-    return placeholderPositions;
-  }
+  return fetchApi<Position[]>("/positions");
 }
 
 export async function getOrders(): Promise<Order[]> {
-  try {
-    return await fetchApi<Order[]>("/admin/orders");
-  } catch {
-    return placeholderOrders;
-  }
+  return fetchApi<Order[]>("/orders");
 }
 
 export async function getSignals(): Promise<Signal[]> {
-  try {
-    return await fetchApi<Signal[]>("/admin/signals");
-  } catch {
-    return placeholderSignals;
-  }
+  return fetchApi<Signal[]>("/signals");
 }
 
 export async function getRiskEvents(): Promise<RiskEvent[]> {
-  try {
-    return await fetchApi<RiskEvent[]>("/admin/risk-events");
-  } catch {
-    return placeholderRiskEvents;
-  }
+  return fetchApi<RiskEvent[]>("/risk-events");
+}
+
+export async function getJobRuns(): Promise<JobRun[]> {
+  return fetchApi<JobRun[]>("/job-runs");
+}
+
+export async function getProposedOrders(): Promise<ProposedOrder[]> {
+  return fetchApi<ProposedOrder[]>("/proposed-orders");
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
-  const [positions, orders, signals, riskEvents] = await Promise.all([
+  const [positions, orders, signals, riskEvents, symbols, jobRuns, proposedOrders] = await Promise.all([
     getPositions(),
     getOrders(),
     getSignals(),
     getRiskEvents(),
+    getSymbols(),
+    getJobRuns(),
+    getProposedOrders(),
   ]);
+  const monitored = activeEtfTrendSymbols(symbols);
+
   return {
     activePositions: positions.length,
     openOrders: orders.filter((order) => order.status !== "filled").length,
     latestSignals: signals.length,
     recentRiskEvents: riskEvents.length,
+    activeEtfSymbols: monitored.length,
+    recentJobRuns: jobRuns.length,
+    proposedOrders: proposedOrders.length,
   };
 }

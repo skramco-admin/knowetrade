@@ -3,14 +3,18 @@ import { getRiskEvents, type RiskEvent } from "../api";
 
 export function RiskPage() {
   const [events, setEvents] = useState<RiskEvent[]>([]);
+  const [error, setError] = useState<string>("");
 
   useEffect(() => {
-    getRiskEvents().then(setEvents);
+    getRiskEvents()
+      .then(setEvents)
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load risk events"));
   }, []);
 
   return (
     <section className="card">
       <h2>Risk</h2>
+      {error ? <p role="alert">API error: {error}</p> : null}
       <table className="table">
         <thead>
           <tr>

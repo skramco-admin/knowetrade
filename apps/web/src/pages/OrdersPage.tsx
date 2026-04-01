@@ -3,14 +3,18 @@ import { getOrders, type Order } from "../api";
 
 export function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [error, setError] = useState<string>("");
 
   useEffect(() => {
-    getOrders().then(setOrders);
+    getOrders()
+      .then(setOrders)
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load orders"));
   }, []);
 
   return (
     <section className="card">
       <h2>Orders</h2>
+      {error ? <p role="alert">API error: {error}</p> : null}
       <table className="table">
         <thead>
           <tr>
