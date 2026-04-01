@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
@@ -245,10 +245,14 @@ class AlpacaBrokerClient:
 
     def get_latest_daily_bar(self, symbol: str) -> DailyBar | None:
         self._ensure_credentials()
+        end_time = datetime.now(timezone.utc)
+        start_time = end_time - timedelta(days=10)
         query = urlencode(
             {
                 "timeframe": "1Day",
-                "limit": "1",
+                "start": start_time.isoformat().replace("+00:00", "Z"),
+                "end": end_time.isoformat().replace("+00:00", "Z"),
+                "limit": "10",
                 "adjustment": "raw",
                 "feed": "iex",
             }
