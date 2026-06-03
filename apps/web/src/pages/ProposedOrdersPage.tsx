@@ -13,7 +13,8 @@ export function ProposedOrdersPage() {
 
   return (
     <section className="card">
-      <h2>Proposed Orders</h2>
+      <h2>What the bot wants to do</h2>
+      <p className="muted">Latest ENTER / HOLD / EXIT proposals from momentum rotation.</p>
       {error ? <p role="alert">API error: {error}</p> : null}
       <table className="table">
         <thead>

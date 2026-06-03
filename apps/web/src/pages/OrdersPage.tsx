@@ -22,7 +22,8 @@ export function OrdersPage() {
 
   return (
     <section className="card">
-      <h2>Orders</h2>
+      <h2>Trades</h2>
+      <p className="muted">Orders actually sent to Alpaca paper trading.</p>
       {error ? <p role="alert">API error: {error}</p> : null}
       <table className="table">
         <thead>

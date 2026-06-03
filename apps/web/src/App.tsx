@@ -23,7 +23,7 @@ export function App() {
       <main className="container">
         <header className="page-header">
           <h1>KnoweTrade</h1>
-          <p>Frontend is API-only. Broker access is backend worker only.</p>
+          <p>Automated ETF paper trading — start on the Dashboard for a plain-English status check.</p>
         </header>
 
         <nav className="tabs" aria-label="Primary">
@@ -34,7 +34,7 @@ export function App() {
             Positions
           </NavLink>
           <NavLink className={({ isActive }: { isActive: boolean }) => (isActive ? "tab active" : "tab")} to="/orders">
-            Orders
+            Trades
           </NavLink>
           <NavLink className={({ isActive }: { isActive: boolean }) => (isActive ? "tab active" : "tab")} to="/signals">
             Signals
@@ -43,16 +43,16 @@ export function App() {
             Risk
           </NavLink>
           <NavLink className={({ isActive }: { isActive: boolean }) => (isActive ? "tab active" : "tab")} to="/proposed-orders">
-            Proposed Orders
+            What bot wants
           </NavLink>
           <NavLink className={({ isActive }: { isActive: boolean }) => (isActive ? "tab active" : "tab")} to="/job-runs">
-            Job Runs
+            Automation log
           </NavLink>
           <NavLink className={({ isActive }: { isActive: boolean }) => (isActive ? "tab active" : "tab")} to="/symbols">
             ETF Universe
           </NavLink>
           <NavLink className={({ isActive }: { isActive: boolean }) => (isActive ? "tab active" : "tab")} to="/system-health">
-            System Health
+            Is it working?
           </NavLink>
         </nav>
 
