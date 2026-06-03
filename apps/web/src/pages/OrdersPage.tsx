@@ -1,5 +1,14 @@
 import { useEffect, useState } from "react";
 import { getOrders, type Order } from "../api";
+import { formatDateTime } from "../format";
+
+function orderSubmittedAt(order: Order): string {
+  return formatDateTime(order.submitted_at ?? order.created_at);
+}
+
+function orderActivityAt(order: Order): string {
+  return formatDateTime(order.filled_at ?? order.updated_at);
+}
 
 export function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -23,6 +32,8 @@ export function OrdersPage() {
             <th>Side</th>
             <th>Qty</th>
             <th>Status</th>
+            <th>Submitted</th>
+            <th>Filled / updated</th>
           </tr>
         </thead>
         <tbody>
@@ -33,6 +44,8 @@ export function OrdersPage() {
               <td>{order.side}</td>
               <td>{order.qty}</td>
               <td>{order.status}</td>
+              <td>{orderSubmittedAt(order)}</td>
+              <td>{orderActivityAt(order)}</td>
             </tr>
           ))}
         </tbody>

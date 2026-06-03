@@ -710,6 +710,7 @@ def list_orders(limit: int = 500) -> list[dict[str, Any]]:
                 "status": row.status,
                 "submitted_at": row.submitted_at.isoformat() if row.submitted_at else None,
                 "filled_at": row.filled_at.isoformat() if row.filled_at else None,
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
                 "created_at": row.created_at.isoformat() if row.created_at else None,
             }
             for row in rows

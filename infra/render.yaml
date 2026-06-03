@@ -21,40 +21,14 @@ services:
     runtime: python
     plan: starter
     buildCommand: pip install -r apps/worker/requirements.txt
-    # Placeholder: replace with your long-running worker entrypoint.
-    startCommand: python -m apps.worker.main
+    # Scheduled trading jobs run via Render crons below. Idle until a long-running task is needed.
+    startCommand: python -c "import time; print('knowetrade-worker idle; use Render crons for scheduled jobs.'); time.sleep(10**9)"
     autoDeploy: true
     envVars:
       - key: DATABASE_URL
         sync: false
-      - key: ALPACA_API_KEY
-        sync: false
-      - key: ALPACA_API_SECRET
-        sync: false
-      - key: ALPACA_SECRET_KEY
-        sync: false
-      - key: ALPACA_BASE_URL
-        value: https://paper-api.alpaca.markets
-      - key: ALPACA_DATA_BASE_URL
-        value: https://data.alpaca.markets
-      - key: SLACK_WEBHOOK_URL
-        sync: false
       - key: APP_MODE
         value: paper
-      - key: TRADING_ENABLED
-        value: "true"
-      - key: ENABLE_ORDER_SUBMISSION
-        value: "false"
-      - key: MAX_OPEN_POSITIONS
-        value: "5"
-      - key: MAX_POSITION_PCT
-        value: "0.20"
-      - key: DRY_RUN
-        value: "false"
-      - key: WORKER_JOB_NAME
-        value: daily_summary
-      - key: WORKER_POLL_SECONDS
-        value: "3600"
 
   - type: cron
     name: knowetrade-premarket
@@ -76,6 +50,8 @@ services:
         value: https://paper-api.alpaca.markets
       - key: SLACK_WEBHOOK_URL
         sync: false
+      - key: SLACK_NOTIFY_MODE
+        value: trades_only
       - key: APP_MODE
         value: paper
       - key: TRADING_ENABLED
@@ -84,6 +60,153 @@ services:
         value: "false"
       - key: WORKER_JOB_NAME
         value: premarket_health_check
+
+  - type: cron
+    name: knowetrade-morning-cycle
+    runtime: python
+    plan: starter
+    schedule: "0 15 * * 1-5"
+    buildCommand: pip install -r apps/worker/requirements.txt
+    startCommand: python -c "from apps.worker.main import run_intraday_trading_workflow_job; run_intraday_trading_workflow_job()"
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_API_SECRET
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: ALPACA_BASE_URL
+        value: https://paper-api.alpaca.markets
+      - key: ALPACA_DATA_BASE_URL
+        value: https://data.alpaca.markets
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: SLACK_NOTIFY_MODE
+        value: trades_only
+      - key: APP_MODE
+        value: paper
+      - key: TRADING_ENABLED
+        value: "true"
+      - key: ENABLE_ORDER_SUBMISSION
+        value: "true"
+      - key: RISK_APPETITE
+        value: ultra_aggressive
+      - key: PORTFOLIO_STRATEGY
+        value: momentum_rotation
+      - key: MOMENTUM_LOOKBACK_DAYS
+        value: "20"
+      - key: MAX_OPEN_POSITIONS
+        value: "20"
+      - key: MAX_PORTFOLIO_POSITIONS
+        value: "20"
+      - key: MAX_POSITION_PCT
+        value: "0.30"
+      - key: PAPER_ORDER_QTY
+        value: "5"
+      - key: MAX_POSITION_NOTIONAL_USD
+        value: "50000"
+      - key: WORKER_JOB_NAME
+        value: intraday_trading_workflow
+
+  - type: cron
+    name: knowetrade-midday-cycle
+    runtime: python
+    plan: starter
+    schedule: "30 17 * * 1-5"
+    buildCommand: pip install -r apps/worker/requirements.txt
+    startCommand: python -c "from apps.worker.main import run_intraday_trading_workflow_job; run_intraday_trading_workflow_job()"
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_API_SECRET
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: ALPACA_BASE_URL
+        value: https://paper-api.alpaca.markets
+      - key: ALPACA_DATA_BASE_URL
+        value: https://data.alpaca.markets
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: SLACK_NOTIFY_MODE
+        value: trades_only
+      - key: APP_MODE
+        value: paper
+      - key: TRADING_ENABLED
+        value: "true"
+      - key: ENABLE_ORDER_SUBMISSION
+        value: "true"
+      - key: RISK_APPETITE
+        value: ultra_aggressive
+      - key: PORTFOLIO_STRATEGY
+        value: momentum_rotation
+      - key: MOMENTUM_LOOKBACK_DAYS
+        value: "20"
+      - key: MAX_OPEN_POSITIONS
+        value: "20"
+      - key: MAX_PORTFOLIO_POSITIONS
+        value: "20"
+      - key: MAX_POSITION_PCT
+        value: "0.30"
+      - key: PAPER_ORDER_QTY
+        value: "5"
+      - key: MAX_POSITION_NOTIONAL_USD
+        value: "50000"
+      - key: WORKER_JOB_NAME
+        value: intraday_trading_workflow
+
+  - type: cron
+    name: knowetrade-afternoon-cycle
+    runtime: python
+    plan: starter
+    schedule: "0 19 * * 1-5"
+    buildCommand: pip install -r apps/worker/requirements.txt
+    startCommand: python -c "from apps.worker.main import run_intraday_trading_workflow_job; run_intraday_trading_workflow_job()"
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_API_SECRET
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: ALPACA_BASE_URL
+        value: https://paper-api.alpaca.markets
+      - key: ALPACA_DATA_BASE_URL
+        value: https://data.alpaca.markets
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: SLACK_NOTIFY_MODE
+        value: trades_only
+      - key: APP_MODE
+        value: paper
+      - key: TRADING_ENABLED
+        value: "true"
+      - key: ENABLE_ORDER_SUBMISSION
+        value: "true"
+      - key: RISK_APPETITE
+        value: ultra_aggressive
+      - key: PORTFOLIO_STRATEGY
+        value: momentum_rotation
+      - key: MOMENTUM_LOOKBACK_DAYS
+        value: "20"
+      - key: MAX_OPEN_POSITIONS
+        value: "20"
+      - key: MAX_PORTFOLIO_POSITIONS
+        value: "20"
+      - key: MAX_POSITION_PCT
+        value: "0.30"
+      - key: PAPER_ORDER_QTY
+        value: "5"
+      - key: MAX_POSITION_NOTIONAL_USD
+        value: "50000"
+      - key: WORKER_JOB_NAME
+        value: intraday_trading_workflow
 
   - type: cron
     name: knowetrade-postclose
@@ -107,12 +230,30 @@ services:
         value: https://data.alpaca.markets
       - key: SLACK_WEBHOOK_URL
         sync: false
+      - key: SLACK_NOTIFY_MODE
+        value: trades_only
       - key: APP_MODE
         value: paper
       - key: TRADING_ENABLED
         value: "true"
       - key: ENABLE_ORDER_SUBMISSION
         value: "false"
+      - key: RISK_APPETITE
+        value: ultra_aggressive
+      - key: PORTFOLIO_STRATEGY
+        value: momentum_rotation
+      - key: MOMENTUM_LOOKBACK_DAYS
+        value: "20"
+      - key: MAX_OPEN_POSITIONS
+        value: "20"
+      - key: MAX_PORTFOLIO_POSITIONS
+        value: "20"
+      - key: MAX_POSITION_PCT
+        value: "0.30"
+      - key: PAPER_ORDER_QTY
+        value: "5"
+      - key: MAX_POSITION_NOTIONAL_USD
+        value: "50000"
       - key: WORKER_JOB_NAME
         value: daily_postclose_workflow
 
@@ -136,12 +277,30 @@ services:
         value: https://paper-api.alpaca.markets
       - key: SLACK_WEBHOOK_URL
         sync: false
+      - key: SLACK_NOTIFY_MODE
+        value: trades_only
       - key: APP_MODE
         value: paper
       - key: TRADING_ENABLED
         value: "true"
       - key: ENABLE_ORDER_SUBMISSION
-        sync: false
+        value: "true"
+      - key: RISK_APPETITE
+        value: ultra_aggressive
+      - key: PORTFOLIO_STRATEGY
+        value: momentum_rotation
+      - key: MOMENTUM_LOOKBACK_DAYS
+        value: "20"
+      - key: MAX_OPEN_POSITIONS
+        value: "20"
+      - key: MAX_PORTFOLIO_POSITIONS
+        value: "20"
+      - key: MAX_POSITION_PCT
+        value: "0.30"
+      - key: PAPER_ORDER_QTY
+        value: "5"
+      - key: MAX_POSITION_NOTIONAL_USD
+        value: "50000"
       - key: WORKER_JOB_NAME
         value: paper_order_execution
 
@@ -165,6 +324,8 @@ services:
         value: https://paper-api.alpaca.markets
       - key: SLACK_WEBHOOK_URL
         sync: false
+      - key: SLACK_NOTIFY_MODE
+        value: trades_only
       - key: APP_MODE
         value: paper
       - key: TRADING_ENABLED
@@ -178,6 +339,7 @@ services:
     name: knowetrade-daily-summary
     runtime: python
     plan: starter
+    # Mon–Fri 21:15 UTC only (weekday guard also enforced in worker code).
     schedule: "15 21 * * 1-5"
     buildCommand: pip install -r apps/worker/requirements.txt
     startCommand: python -c "from apps.worker.main import run_daily_summary_job; run_daily_summary_job()"
@@ -186,6 +348,8 @@ services:
         sync: false
       - key: SLACK_WEBHOOK_URL
         sync: false
+      - key: SLACK_NOTIFY_MODE
+        value: trades_only
       - key: APP_MODE
         value: paper
       - key: WORKER_JOB_NAME

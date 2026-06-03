@@ -65,9 +65,10 @@ Seed and migrations for the v1 universe are in:
 Production-style daily workflow uses separate callable worker jobs:
 
 - `premarket_health_check`
+- `intraday_trading_workflow` (morning / midday / afternoon cycles)
 - `etf_data_ingestion`
 - `etf_signal_generation`
-- `dry_run_portfolio_decisioning`
+- `dry_run_portfolio_decisioning` — ranks ETFs by 20-day momentum and targets top N (`PORTFOLIO_STRATEGY=momentum_rotation`)
 - `paper_order_execution`
 - `daily_reconciliation`
 - `daily_summary`
@@ -130,8 +131,13 @@ Render cron wiring is defined in `infra/render.yaml`.
 - `ALPACA_DATA_BASE_URL` (`https://data.alpaca.markets`)
 - `SLACK_WEBHOOK_URL`
 - `DATABASE_URL`
-- `MAX_OPEN_POSITIONS` (default `5`)
-- `MAX_POSITION_PCT` (default `0.20`)
+- `RISK_APPETITE` (`conservative`, `moderate`, `aggressive`, `ultra_aggressive`; default `aggressive`)
+- `PORTFOLIO_STRATEGY` (`momentum_rotation` default, or `trend_following` for legacy BUY-signal selection)
+- `MOMENTUM_LOOKBACK_DAYS` (default `20`)
+- `MAX_OPEN_POSITIONS` (default from appetite; `ultra_aggressive` uses `20`)
+- `MAX_POSITION_PCT` (default from appetite; `ultra_aggressive` uses `0.30`)
+- `PAPER_ORDER_QTY` (default from appetite; `ultra_aggressive` uses `5`)
+- `MAX_POSITION_NOTIONAL_USD` (default from appetite; `ultra_aggressive` uses `50000`)
 - `LOG_LEVEL`
 
 ## Safety controls
@@ -149,6 +155,7 @@ Render cron wiring is defined in `infra/render.yaml`.
 ## Daily cron jobs
 
 - Premarket check: `run_premarket_health_check_job`
+- Intraday cycles (ingest + signals + decisioning + orders): `run_intraday_trading_workflow_job`
 - Post-close chain (ingest + signals + decisioning): `run_postclose_workflow_job`
 - Order submission window: `run_paper_order_execution_job`
 - Reconciliation: `run_reconciliation_job`
@@ -171,6 +178,7 @@ Render cron wiring is defined in `infra/render.yaml`.
 - Supabase schema migration: `supabase/migrations/0001_initial_schema.sql`
 - Symbols metadata migration: `supabase/migrations/0002_symbols_universe_columns.sql`
 - Price bars migration: `supabase/migrations/0003_price_bars_table.sql`
+- ETF universe expansion: `supabase/migrations/0008_expand_etf_universe.sql`, `0009_expand_etf_universe_recommended.sql`
 - Signals extension migration: `supabase/migrations/0004_signals_reason.sql`
 - Proposed orders migration: `supabase/migrations/0005_proposed_orders.sql`
 - Orders/fills alignment migration: `supabase/migrations/0006_orders_and_fills_alignment.sql`

@@ -1,12 +1,21 @@
 from __future__ import annotations
 
-import logging
-import os
-import time
-from datetime import datetime, timezone
-from statistics import mean
+from typing import Callable
 
-from packages.alerts.slack import sendCriticalAlert, sendDailySummary, sendWarningAlert
+from packages.alerts.slack import (
+    is_trading_weekday_utc,
+    sendCriticalAlert,
+    sendDailySummary,
+    sendTradeAlert,
+    sendWarningAlert,
+)
+from packages.core.risk import resolve_risk_limits
+from packages.core.rotation import (
+    build_rotation_decision,
+    rank_symbols_by_momentum,
+    rotation_reason,
+)
+from packages.core.signals import calculate_trend_signal, rules_for_appetite
 from packages.broker_alpaca.client import (
     AlpacaBrokerClient,
     BrokerAuthError,
@@ -35,6 +44,20 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 logger = logging.getLogger("knowetrade.worker")
+
+_SCHEDULED_TRADING_JOBS = frozenset(
+    {
+        "daily_summary",
+        "premarket_health_check",
+        "daily_postclose_workflow",
+        "intraday_trading_workflow",
+        "paper_order_execution",
+        "daily_reconciliation",
+        "etf_data_ingestion",
+        "etf_signal_generation",
+        "dry_run_portfolio_decisioning",
+    }
+)
 
 
 def _job_name() -> str:
@@ -81,53 +104,64 @@ def run_reconciliation_job() -> None:
 
 
 def run_daily_summary_job() -> None:
-    run_once()
+    main_once()
 
 
 def run_postclose_workflow_job() -> None:
     run_once()
 
 
+def run_intraday_trading_workflow_job() -> None:
+    main_once()
+
+
+def _risk_appetite() -> str:
+    from packages.core.risk import normalize_risk_appetite
+
+    return normalize_risk_appetite(os.getenv("RISK_APPETITE"))
+
+
+def _signal_rules():
+    return rules_for_appetite(_risk_appetite())
+
+
+def _risk_limits():
+    return resolve_risk_limits(_risk_appetite())
+
+
+def _run_trading_pipeline_steps(*, include_order_execution: bool) -> tuple[str, int, int]:
+    original_job = _job_name()
+    try:
+        os.environ["WORKER_JOB_NAME"] = "etf_data_ingestion"
+        run_once()
+        os.environ["WORKER_JOB_NAME"] = "etf_signal_generation"
+        run_once()
+        os.environ["WORKER_JOB_NAME"] = "dry_run_portfolio_decisioning"
+        run_once()
+        succeeded_count = 3
+        if include_order_execution:
+            os.environ["WORKER_JOB_NAME"] = "paper_order_execution"
+            run_once()
+            succeeded_count = 4
+        return "success", succeeded_count, 0
+    finally:
+        os.environ["WORKER_JOB_NAME"] = original_job
+
+
 def _calculate_signal(closes: list[float]) -> tuple[str, float, str]:
-    if len(closes) < 100:
-        return "HOLD", 0.0, "insufficient_data_for_100d_ma"
-
-    latest_close = closes[-1]
-    sma20 = mean(closes[-20:])
-    sma50 = mean(closes[-50:])
-    sma100 = mean(closes[-100:])
-    momentum20 = 0.0
-    if len(closes) >= 21 and closes[-21] != 0:
-        momentum20 = (latest_close / closes[-21]) - 1.0
-
-    close_gt_50 = latest_close > sma50
-    sma20_gt_50 = sma20 > sma50
-    momentum_positive = momentum20 > 0
-
-    if close_gt_50 and sma20_gt_50 and momentum_positive:
-        signal = "BUY"
-    elif (not close_gt_50) and (not sma20_gt_50) and momentum20 < 0:
-        signal = "EXIT"
-    else:
-        signal = "HOLD"
-
-    reason = (
-        f"close={latest_close:.4f} sma20={sma20:.4f} sma50={sma50:.4f} "
-        f"sma100={sma100:.4f} momentum20={momentum20:.6f}"
-    )
-    return signal, momentum20, reason
+    return calculate_trend_signal(closes, _signal_rules())
 
 
 def _max_positions() -> int:
-    return int(os.getenv("MAX_PORTFOLIO_POSITIONS", "5"))
+    return _risk_limits().max_portfolio_positions
 
 
 def _max_open_positions() -> int:
-    return int(os.getenv("MAX_OPEN_POSITIONS", str(_max_positions())))
+    return _risk_limits().max_open_positions
 
 
 def _max_position_pct() -> float:
-    return float(os.getenv("MAX_POSITION_PCT", "0.20"))
+    return _risk_limits().max_position_pct
 
 
 def _app_mode() -> str:
@@ -146,7 +180,138 @@ def _order_submission_enabled() -> bool:
 
 
 def _paper_order_qty() -> int:
-    return int(os.getenv("PAPER_ORDER_QTY", "1"))
+    return _risk_limits().paper_order_qty
+
+
+def _portfolio_strategy() -> str:
+    return os.getenv("PORTFOLIO_STRATEGY", "momentum_rotation").strip().lower().replace("-", "_")
+
+
+def _momentum_lookback_days() -> int:
+    return int(os.getenv("MOMENTUM_LOOKBACK_DAYS", "20"))
+
+
+def _load_symbol_closes(symbols: list[str], *, limit: int = 120) -> dict[str, list[float]]:
+    closes_by_symbol: dict[str, list[float]] = {}
+    for symbol in symbols:
+        recent = list_recent_price_bars(symbol, limit=limit)
+        if not recent:
+            continue
+        closes_by_symbol[symbol.upper()] = [row["close"] for row in reversed(recent)]
+    return closes_by_symbol
+
+
+def _apply_portfolio_proposals(
+    *,
+    job_name: str,
+    entered: tuple[str, ...] | list[str],
+    held: tuple[str, ...] | list[str],
+    exited: tuple[str, ...] | list[str],
+    target_weight: float,
+    reason_for_symbol: Callable[[str, str], str],
+) -> None:
+    for symbol in entered:
+        reason = reason_for_symbol("ENTER", symbol)
+        record_proposed_order(job_name, symbol, "ENTER", target_weight, reason)
+        logger.info("decision.proposed symbol=%s action=ENTER reason=%s", symbol, reason)
+    for symbol in held:
+        reason = reason_for_symbol("HOLD", symbol)
+        record_proposed_order(job_name, symbol, "HOLD", target_weight, reason)
+        logger.info("decision.proposed symbol=%s action=HOLD reason=%s", symbol, reason)
+    for symbol in exited:
+        reason = reason_for_symbol("EXIT", symbol)
+        record_proposed_order(job_name, symbol, "EXIT", 0.0, reason)
+        logger.info("decision.proposed symbol=%s action=EXIT reason=%s", symbol, reason)
+
+
+def _run_momentum_rotation_decisioning(symbols: list[str], job_name: str) -> dict[str, object]:
+    closes_by_symbol = _load_symbol_closes(symbols)
+    ranked = rank_symbols_by_momentum(closes_by_symbol, lookback=_momentum_lookback_days())
+    rank_by_symbol = {row.symbol: index + 1 for index, row in enumerate(ranked)}
+    momentum_by_symbol = {row.symbol: row.momentum for row in ranked}
+
+    broker = AlpacaBrokerClient()
+    currently_held = _combined_long_symbols(symbols, broker=broker)
+    decision = build_rotation_decision(
+        ranked=ranked,
+        currently_held=currently_held,
+        max_positions=_max_positions(),
+        max_position_pct=_max_position_pct(),
+    )
+
+    def reason_for(action: str, symbol: str) -> str:
+        upper = symbol.upper()
+        return rotation_reason(
+            action=action,
+            symbol=upper,
+            rank=rank_by_symbol.get(upper),
+            momentum=momentum_by_symbol.get(upper),
+            target_weight=decision.target_weight,
+        )
+
+    _apply_portfolio_proposals(
+        job_name=job_name,
+        entered=decision.entered,
+        held=decision.held,
+        exited=decision.exited,
+        target_weight=decision.target_weight,
+        reason_for_symbol=reason_for,
+    )
+    top_symbols = [row.symbol for row in decision.ranked]
+    return {
+        "considered_count": len(closes_by_symbol),
+        "ranked_count": len(ranked),
+        "top_targets": top_symbols,
+        "entered": list(decision.entered),
+        "held": list(decision.held),
+        "exited": list(decision.exited),
+        "target_weight": decision.target_weight,
+    }
+
+
+def _run_trend_following_decisioning(symbols: list[str], job_name: str) -> dict[str, object]:
+    latest_signals = list_latest_signals_for_symbols(symbols)
+    signal_by_symbol = {row["symbol"]: row for row in latest_signals}
+    buy_candidates = sorted(
+        [row for row in latest_signals if str(row["signal"]).upper() == "BUY"],
+        key=lambda row: (float(row["strength"]), row["symbol"]),
+        reverse=True,
+    )
+    max_positions = _max_positions()
+    target_set = {row["symbol"] for row in buy_candidates[:max_positions]}
+
+    broker = AlpacaBrokerClient()
+    currently_held = _combined_long_symbols(symbols, broker=broker)
+    entered = sorted(target_set - currently_held)
+    held = sorted(target_set & currently_held)
+    exited = sorted(currently_held - target_set)
+    equal_weight = (1.0 / len(target_set)) if target_set else 0.0
+    target_weight = min(equal_weight, _max_position_pct())
+
+    def reason_for(action: str, symbol: str) -> str:
+        row = signal_by_symbol.get(symbol, {})
+        if action == "EXIT":
+            return f"exit_target target_weight=0.0000; {row.get('reason', '')}".strip()
+        prefix = "enter_target" if action == "ENTER" else "hold_target"
+        return f"{prefix} equal_weight={target_weight:.4f}; {row.get('reason', '')}".strip()
+
+    _apply_portfolio_proposals(
+        job_name=job_name,
+        entered=entered,
+        held=held,
+        exited=exited,
+        target_weight=target_weight,
+        reason_for_symbol=reason_for,
+    )
+    return {
+        "considered_count": len(signal_by_symbol),
+        "ranked_count": len(buy_candidates),
+        "top_targets": [row["symbol"] for row in buy_candidates[:max_positions]],
+        "entered": entered,
+        "held": held,
+        "exited": exited,
+        "target_weight": target_weight,
+    }
 
 
 def _parse_dt(value: str | None) -> datetime | None:
@@ -158,11 +323,60 @@ def _parse_dt(value: str | None) -> datetime | None:
         return None
 
 
+def _auto_exit_orphan_positions() -> bool:
+    return os.getenv("AUTO_EXIT_ORPHAN_POSITIONS", "true").strip().lower() == "true"
+
+
+def _monitored_symbol_set(symbols: list[str]) -> set[str]:
+    return {symbol.upper() for symbol in symbols}
+
+
+def _local_long_symbols(symbols: list[str]) -> set[str]:
+    qty_by_symbol = list_position_qty_by_symbols(symbols)
+    return {symbol for symbol, qty in qty_by_symbol.items() if qty > 0}
+
+
+def _broker_long_symbols(broker: AlpacaBrokerClient, monitored: set[str]) -> set[str]:
+    broker_positions = broker.list_positions()
+    return {
+        position.symbol.upper()
+        for position in broker_positions
+        if position.qty > 0 and position.symbol.upper() in monitored
+    }
+
+
+def _combined_long_symbols(symbols: list[str], broker: AlpacaBrokerClient | None = None) -> set[str]:
+    monitored = _monitored_symbol_set(symbols)
+    held = _local_long_symbols(symbols)
+    if broker is not None:
+        try:
+            held |= _broker_long_symbols(broker, monitored)
+        except BrokerAuthError as exc:
+            logger.warning("broker.positions_unavailable reason=%s", exc)
+    return held
+
+
+def _record_orphan_exit_proposals(symbols: list[str], orphan_symbols: list[str], source_job: str) -> None:
+    for symbol in orphan_symbols:
+        record_proposed_order(
+            source_job,
+            symbol,
+            "EXIT",
+            0.0,
+            "orphan_broker_position_not_in_target_portfolio",
+        )
+        logger.info("decision.proposed symbol=%s action=EXIT reason=orphan_broker_position", symbol)
+
+
 def run_once() -> None:
-    init_database()
     started_at = datetime.now(timezone.utc)
     job_name = _job_name()
-    logger.info("job.start %s", job_name)
+    if job_name in _SCHEDULED_TRADING_JOBS and not is_trading_weekday_utc(started_at):
+        logger.info("job.skipped %s reason=non_trading_day utc_weekday=%s", job_name, started_at.weekday())
+        return
+
+    init_database()
+    logger.info("job.start %s risk_appetite=%s", job_name, _risk_appetite())
 
     symbols = _load_monitored_symbols()
     processed_count = len(symbols)
@@ -195,59 +409,33 @@ def run_once() -> None:
             ]
         )
     elif job_name == "dry_run_portfolio_decisioning":
-        latest_signals = list_latest_signals_for_symbols(symbols)
-        signal_by_symbol = {row["symbol"]: row for row in latest_signals}
-        considered_symbols = sorted(signal_by_symbol.keys())
-        buy_candidates = sorted(
-            [
-                row
-                for row in latest_signals
-                if str(row["signal"]).upper() == "BUY"
-            ],
-            key=lambda row: (float(row["strength"]), row["symbol"]),
-            reverse=True,
-        )
-        max_positions = _max_positions()
-        target_symbols = [row["symbol"] for row in buy_candidates[:max_positions]]
-        target_set = set(target_symbols)
+        strategy = _portfolio_strategy()
+        if strategy in {"momentum_rotation", "rotation", "momentum"}:
+            summary = _run_momentum_rotation_decisioning(symbols, job_name)
+            logger.info(
+                "decision.rotation strategy=%s ranked=%s targets=%s",
+                strategy,
+                summary["ranked_count"],
+                ",".join(summary["top_targets"]),  # type: ignore[arg-type]
+            )
+        else:
+            summary = _run_trend_following_decisioning(symbols, job_name)
+            logger.info("decision.trend_following strategy=%s", strategy)
 
-        qty_by_symbol = list_position_qty_by_symbols(symbols)
-        currently_held = {symbol for symbol, qty in qty_by_symbol.items() if qty > 0}
-
-        entered = sorted(target_set - currently_held)
-        held = sorted(target_set & currently_held)
-        exited = sorted(currently_held - target_set)
-        equal_weight = (1.0 / len(target_set)) if target_set else 0.0
-        target_weight = min(equal_weight, _max_position_pct())
-
-        for symbol in entered:
-            row = signal_by_symbol.get(symbol, {})
-            reason = f"enter_target equal_weight={target_weight:.4f}; {row.get('reason', '')}".strip()
-            record_proposed_order(job_name, symbol, "ENTER", target_weight, reason)
-            logger.info("decision.proposed symbol=%s action=ENTER reason=%s", symbol, reason)
-        for symbol in held:
-            row = signal_by_symbol.get(symbol, {})
-            reason = f"hold_target equal_weight={target_weight:.4f}; {row.get('reason', '')}".strip()
-            record_proposed_order(job_name, symbol, "HOLD", target_weight, reason)
-            logger.info("decision.proposed symbol=%s action=HOLD reason=%s", symbol, reason)
-        for symbol in exited:
-            row = signal_by_symbol.get(symbol, {})
-            reason = f"exit_target target_weight=0.0000; {row.get('reason', '')}".strip()
-            record_proposed_order(job_name, symbol, "EXIT", 0.0, reason)
-            logger.info("decision.proposed symbol=%s action=EXIT reason=%s", symbol, reason)
-
-        succeeded_count = len(entered) + len(held) + len(exited)
+        succeeded_count = len(summary["entered"]) + len(summary["held"]) + len(summary["exited"])  # type: ignore[arg-type]
         failed_count = 0
         status = "success"
         sendDailySummary(
             [
                 f"job={job_name}",
-                f"symbols_considered={len(considered_symbols)}",
-                f"buy_candidates={','.join([row['symbol'] for row in buy_candidates])}",
-                f"enters={','.join(entered)}",
-                f"holds={','.join(held)}",
-                f"exits={','.join(exited)}",
-                f"target_weight={target_weight:.4f}",
+                f"strategy={strategy}",
+                f"symbols_with_bars={summary['considered_count']}",
+                f"ranked={summary['ranked_count']}",
+                f"top_targets={','.join(summary['top_targets'])}",  # type: ignore[arg-type]
+                f"enters={','.join(summary['entered'])}",  # type: ignore[arg-type]
+                f"holds={','.join(summary['held'])}",  # type: ignore[arg-type]
+                f"exits={','.join(summary['exited'])}",  # type: ignore[arg-type]
+                f"target_weight={summary['target_weight']}",
             ]
         )
     elif job_name == "paper_order_execution":
@@ -266,6 +454,20 @@ def run_once() -> None:
             raise
 
         broker_qty_by_symbol = {position.symbol: position.qty for position in broker_positions if position.qty > 0}
+        broker_long_set = {symbol for symbol, qty in broker_qty_by_symbol.items() if qty > 0}
+        monitored = _monitored_symbol_set(symbols)
+        intended_long_set = set(enter_symbols + hold_symbols)
+
+        if _auto_exit_orphan_positions():
+            orphan_exits = sorted(
+                symbol
+                for symbol in broker_long_set
+                if symbol.upper() in monitored and symbol not in intended_long_set and symbol not in exit_symbols
+            )
+            if orphan_exits:
+                _record_orphan_exit_proposals(symbols, orphan_exits, job_name)
+                exit_symbols = sorted(set(exit_symbols) | set(orphan_exits))
+                logger.warning("order.orphan_exits symbols=%s", ",".join(orphan_exits))
 
         app_mode = _app_mode()
         trading_enabled = _trading_enabled()
@@ -323,13 +525,15 @@ def run_once() -> None:
                         )
                     submitted_count += 1
                     current_long_count += 1
-                    sendWarningAlert(
-                        "Order submitted",
-                        f"symbol={symbol} side=buy qty={request.qty} broker_order_id={order.get('id')}",
+                    sendTradeAlert(
+                        symbol=symbol,
+                        side="buy",
+                        qty=request.qty,
+                        broker_order_id=str(order.get("id", "")) or None,
                     )
                 except OrderRejectedError as exc:
                     rejected_count += 1
-                    sendWarningAlert("Order rejected", f"symbol={symbol} side=buy qty={request.qty} reason={exc}")
+                    logger.warning("order.rejected symbol=%s side=buy qty=%s reason=%s", symbol, request.qty, exc)
             for symbol in exit_symbols:
                 qty = int(abs(broker_qty_by_symbol.get(symbol, 0)))
                 if qty <= 0:
@@ -358,13 +562,15 @@ def run_once() -> None:
                             fill_time=_parse_dt(order.get("filled_at")),
                         )
                     submitted_count += 1
-                    sendWarningAlert(
-                        "Order submitted",
-                        f"symbol={symbol} side=sell qty={request.qty} broker_order_id={order.get('id')}",
+                    sendTradeAlert(
+                        symbol=symbol,
+                        side="sell",
+                        qty=request.qty,
+                        broker_order_id=str(order.get("id", "")) or None,
                     )
                 except OrderRejectedError as exc:
                     rejected_count += 1
-                    sendWarningAlert("Order rejected", f"symbol={symbol} side=sell qty={request.qty} reason={exc}")
+                    logger.warning("order.rejected symbol=%s side=sell qty=%s reason=%s", symbol, request.qty, exc)
         else:
             logger.info(
                 "order.submission_disabled app_mode=%s trading_enabled=%s enable_order_submission=%s",
@@ -451,24 +657,37 @@ def run_once() -> None:
         broker_long_set = {position.symbol for position in broker_positions if position.qty > 0}
         missing_in_broker = sorted(intended_long_set - broker_long_set)
         unexpected_in_broker = sorted(broker_long_set - intended_long_set)
+        monitored = _monitored_symbol_set(symbols)
+        orphan_exits = sorted(
+            symbol for symbol in unexpected_in_broker if symbol.upper() in monitored
+        )
+        if orphan_exits and _auto_exit_orphan_positions():
+            _record_orphan_exit_proposals(symbols, orphan_exits, job_name)
+            unexpected_in_broker = sorted(set(unexpected_in_broker) - set(orphan_exits))
+            logger.warning(
+                "reconcile.orphan_exit_proposals recorded=%s",
+                ",".join(orphan_exits),
+            )
         if missing_in_broker or unexpected_in_broker:
             failed_count = 1
             status = "completed_with_errors"
             sendWarningAlert(
                 "Reconcile mismatch",
-                f"missing_in_broker={','.join(missing_in_broker)} unexpected_in_broker={','.join(unexpected_in_broker)}",
+                f"missing_in_broker={','.join(missing_in_broker) or 'none'} "
+                f"unexpected_in_broker={','.join(unexpected_in_broker) or 'none'}",
             )
         else:
             status = "success"
             succeeded_count = len(intended_long_set)
-            sendDailySummary(
-                [
-                    f"job={job_name}",
-                    f"intended_positions={len(intended_long_set)}",
-                    f"broker_positions={len(broker_long_set)}",
-                    "status=success",
-                ]
-            )
+            summary_lines = [
+                f"job={job_name}",
+                f"intended_positions={len(intended_long_set)}",
+                f"broker_positions={len(broker_long_set)}",
+                "status=success",
+            ]
+            if orphan_exits and _auto_exit_orphan_positions():
+                summary_lines.append(f"orphan_exit_proposed={','.join(orphan_exits)}")
+            sendDailySummary(summary_lines)
     elif job_name == "daily_summary":
         recent_runs = list_job_runs(limit=25)
         status = "success"
@@ -480,22 +699,19 @@ def run_once() -> None:
             ]
         )
     elif job_name == "daily_postclose_workflow":
-        original_job = job_name
         try:
-            os.environ["WORKER_JOB_NAME"] = "etf_data_ingestion"
-            run_once()
-            os.environ["WORKER_JOB_NAME"] = "etf_signal_generation"
-            run_once()
-            os.environ["WORKER_JOB_NAME"] = "dry_run_portfolio_decisioning"
-            run_once()
-            status = "success"
-            succeeded_count = 3
+            status, succeeded_count, failed_count = _run_trading_pipeline_steps(include_order_execution=False)
         except Exception as exc:
             status = "failed"
             failed_count = 1
             sendCriticalAlert("Daily failure halt", f"postclose workflow halted: {exc}")
-        finally:
-            os.environ["WORKER_JOB_NAME"] = original_job
+    elif job_name == "intraday_trading_workflow":
+        try:
+            status, succeeded_count, failed_count = _run_trading_pipeline_steps(include_order_execution=True)
+        except Exception as exc:
+            status = "failed"
+            failed_count = 1
+            sendCriticalAlert("Intraday workflow halt", f"intraday trading workflow halted: {exc}")
     else:
         broker = AlpacaBrokerClient()
         for symbol in symbols:
@@ -557,12 +773,24 @@ def run_once() -> None:
 
 
 def main() -> None:
+    job_name = _job_name()
+    if job_name == "daily_summary":
+        logger.error(
+            "daily_summary is cron-only (Mon-Fri 21:15 UTC via knowetrade-daily-summary). "
+            "Do not run it in the polling worker."
+        )
+        raise SystemExit(1)
+
     poll_seconds = int(os.getenv("WORKER_POLL_SECONDS", "60"))
     while True:
+        if job_name in _SCHEDULED_TRADING_JOBS and not is_trading_weekday_utc():
+            logger.info("worker.poll_skipped reason=non_trading_day job=%s", job_name)
+            time.sleep(poll_seconds)
+            continue
         try:
             run_once()
         except Exception as exc:  # pragma: no cover - scaffold error path
-            logger.exception("job.failed %s", _job_name())
+            logger.exception("job.failed %s", job_name)
             sendCriticalAlert("Job failure", f"KnoweTrade worker failed: {exc}")
         time.sleep(poll_seconds)
 

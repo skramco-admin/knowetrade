@@ -47,7 +47,10 @@ function buildCountdown(label: string, hourUtc: number, minuteUtc: number): Cron
 export function getTradingCronCountdowns(): CronCountdown[] {
   return [
     buildCountdown("Next premarket health check", 13, 30),
-    buildCountdown("Next strategy check (postclose workflow)", 20, 30),
+    buildCountdown("Next morning strategy cycle", 15, 0),
+    buildCountdown("Next midday strategy cycle", 17, 30),
+    buildCountdown("Next afternoon strategy cycle", 19, 0),
+    buildCountdown("Next end-of-day strategy cycle (postclose)", 20, 30),
     buildCountdown("Next trade execution check (order-submit)", 20, 40),
     buildCountdown("Next reconciliation check", 21, 0),
     buildCountdown("Next daily summary", 21, 15),
