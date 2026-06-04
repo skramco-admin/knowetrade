@@ -56,3 +56,17 @@ export function getTradingCronCountdowns(): CronCountdown[] {
     buildCountdown("Next daily summary", 21, 15),
   ];
 }
+
+function countdownMs(item: CronCountdown): number {
+  const parts = item.countdown.split(":").map((part) => Number.parseInt(part, 10));
+  if (parts.length !== 3 || parts.some((part) => Number.isNaN(part))) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  const [hours, minutes, seconds] = parts;
+  return ((hours * 60 + minutes) * 60 + seconds) * 1000;
+}
+
+/** Soonest upcoming weekday cron (not simply the first in the schedule list). */
+export function getNextTradingCron(countdowns: CronCountdown[] = getTradingCronCountdowns()): CronCountdown {
+  return [...countdowns].sort((a, b) => countdownMs(a) - countdownMs(b))[0];
+}

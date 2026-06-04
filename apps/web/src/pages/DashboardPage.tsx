@@ -27,7 +27,7 @@ import {
   buildTodayStats,
 } from "../dashboardInsights";
 import { formatPct, formatUsd } from "../format";
-import { getTradingCronCountdowns, type CronCountdown } from "../schedule";
+import { getNextTradingCron, getTradingCronCountdowns, type CronCountdown } from "../schedule";
 
 export function DashboardPage() {
   const [account, setAccount] = useState<AccountMetrics | null>(null);
@@ -93,7 +93,7 @@ export function DashboardPage() {
     };
   }, []);
 
-  const nextCron = cronCountdowns[0];
+  const nextCron = getNextTradingCron(cronCountdowns);
   const accountOverview = useMemo(
     () => buildAccountOverview(account, positions, orders),
     [account, positions, orders],
