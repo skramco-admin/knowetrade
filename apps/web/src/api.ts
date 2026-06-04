@@ -15,6 +15,10 @@ export type Order = {
   order_type?: string;
   submitted_at?: string;
   filled_at?: string;
+  filled_avg_price?: number;
+  cost_basis_avg?: number;
+  realized_pnl_usd?: number;
+  realized_pnl_pct?: number;
   updated_at?: string;
   created_at?: string;
 };
@@ -30,10 +34,11 @@ export type Signal = {
 
 export type RiskEvent = {
   id: number;
-  symbol?: string;
+  symbol?: string | null;
   severity: string;
   reason: string;
   event_time?: string;
+  created_at?: string;
 };
 
 export type SystemHealth = {
@@ -81,9 +86,14 @@ export type AccountMetrics = {
   cash: number;
   buying_power: number;
   equity: number;
+  portfolio_value: number;
   last_equity: number;
+  long_market_value: number;
+  starting_equity: number;
   day_pnl: number;
   day_pnl_pct: number;
+  lifetime_pnl: number;
+  lifetime_pnl_pct: number;
 };
 
 export type SymbolRow = {

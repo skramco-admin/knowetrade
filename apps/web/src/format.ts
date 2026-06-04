@@ -77,3 +77,33 @@ export function formatPct(value: number | undefined): string {
   }
   return `${(value * 100).toFixed(2)}%`;
 }
+
+export function formatRealizedPnlUsd(value: number | undefined): string {
+  if (value === undefined) {
+    return "—";
+  }
+  const sign = value >= 0 ? "+" : "-";
+  return `${sign}$${Math.abs(value).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+}
+
+export function formatRealizedPnlPct(value: number | undefined): string {
+  if (value === undefined) {
+    return "—";
+  }
+  const sign = value >= 0 ? "+" : "";
+  return `${sign}${(value * 100).toFixed(2)}%`;
+}
+
+export function formatOrderPnl(order: {
+  side: string;
+  realized_pnl_usd?: number;
+  realized_pnl_pct?: number;
+}): string {
+  if (order.side.toLowerCase() !== "sell") {
+    return "—";
+  }
+  if (order.realized_pnl_usd === undefined || order.realized_pnl_pct === undefined) {
+    return "—";
+  }
+  return `${formatRealizedPnlUsd(order.realized_pnl_usd)} (${formatRealizedPnlPct(order.realized_pnl_pct)})`;
+}

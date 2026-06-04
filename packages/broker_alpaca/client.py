@@ -43,6 +43,7 @@ class DailyBar:
 class BrokerPosition:
     symbol: str
     qty: float
+    avg_entry_price: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -125,16 +126,28 @@ class AlpacaBrokerClient:
         body = response.json()
         equity = float(body.get("equity", 0) or 0)
         last_equity = float(body.get("last_equity", 0) or 0)
+        cash = float(body.get("cash", 0) or 0)
+        long_market_value = float(body.get("long_market_value", 0) or 0)
+        portfolio_value = float(body.get("portfolio_value", equity) or equity)
         day_pnl = equity - last_equity
         day_pnl_pct = (day_pnl / last_equity) if last_equity > 0 else 0.0
+        starting_equity = float(os.getenv("PAPER_ACCOUNT_STARTING_EQUITY", "100000") or 100000)
+        lifetime_pnl = equity - starting_equity
+        lifetime_pnl_pct = (lifetime_pnl / starting_equity) if starting_equity > 0 else 0.0
+        in_market = long_market_value if long_market_value > 0 else max(equity - cash, 0.0)
         return {
             "status": str(body.get("status", "")),
-            "cash": float(body.get("cash", 0) or 0),
+            "cash": cash,
             "buying_power": float(body.get("buying_power", 0) or 0),
             "equity": equity,
+            "portfolio_value": portfolio_value,
             "last_equity": last_equity,
+            "long_market_value": in_market,
+            "starting_equity": starting_equity,
             "day_pnl": day_pnl,
             "day_pnl_pct": day_pnl_pct,
+            "lifetime_pnl": lifetime_pnl,
+            "lifetime_pnl_pct": lifetime_pnl_pct,
         }
 
     def place_order(self, order: OrderRequest) -> dict[str, Any]:
@@ -208,10 +221,14 @@ class AlpacaBrokerClient:
                 qty = float(row.get("qty", 0))
             except (TypeError, ValueError):
                 qty = 0.0
+            try:
+                avg_entry_price = float(row.get("avg_entry_price", 0) or 0)
+            except (TypeError, ValueError):
+                avg_entry_price = 0.0
             symbol = str(row.get("symbol", "")).upper()
             if not symbol:
                 continue
-            out.append(BrokerPosition(symbol=symbol, qty=qty))
+            out.append(BrokerPosition(symbol=symbol, qty=qty, avg_entry_price=avg_entry_price))
         return out
 
     def list_open_orders(self) -> list[BrokerOrder]:

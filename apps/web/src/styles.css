@@ -112,6 +112,64 @@ body {
   gap: 0;
 }
 
+.account-card {
+  border-color: #059669;
+}
+
+.account-overview {
+  margin-top: 0.5rem;
+}
+
+.account-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid #374151;
+  border-radius: 0.5rem;
+  background: #111827;
+}
+
+.account-hero-label {
+  margin: 0;
+  color: #9ca3af;
+  font-size: 0.9rem;
+}
+
+.account-hero-value {
+  margin: 0.2rem 0;
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.account-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.75rem;
+}
+
+.account-stat {
+  border: 1px solid #374151;
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  background: #111827;
+}
+
+.account-stat h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  color: #d1d5db;
+}
+
+.account-stat p {
+  margin: 0.1rem 0 0;
+  font-size: 1.1rem;
+}
+
 .glance-card {
   border-color: #2563eb;
 }
@@ -290,4 +348,12 @@ body {
 
 .health-meta {
   margin-top: 1rem;
+}
+
+.pnl-positive {
+  color: #6ee7b7;
+}
+
+.pnl-negative {
+  color: #fca5a5;
 }

@@ -74,6 +74,79 @@ type TickerListProps = {
   emptyLabel: string;
 };
 
+type AccountOverviewPanelProps = {
+  overview: {
+    totalValue: number;
+    cash: number;
+    inMarket: number;
+    openPositions: number;
+    startingEquity: number;
+    dayPnl: number;
+    dayPnlPct: number;
+    lifetimePnl: number;
+    lifetimePnlPct: number;
+    realizedPnlTracked: number;
+    overallStatus: StatusLevel;
+    overallLabel: string;
+    dayStatus: StatusLevel;
+    dayLabel: string;
+  };
+  formatUsd: (value: number | undefined) => string;
+  formatPct: (value: number | undefined) => string;
+};
+
+export function AccountOverviewPanel({ overview, formatUsd, formatPct }: AccountOverviewPanelProps) {
+  return (
+    <div className="account-overview">
+      <div className="account-hero">
+        <div>
+          <p className="account-hero-label">Total paper trading account</p>
+          <p className="account-hero-value">{formatUsd(overview.totalValue)}</p>
+          <p className="muted">
+            Alpaca paper account · started at {formatUsd(overview.startingEquity)}
+          </p>
+        </div>
+        <StatusPill status={overview.overallStatus} label={overview.overallLabel} />
+      </div>
+      <div className="account-grid">
+        <article className="account-stat">
+          <h3>All-time gain / loss</h3>
+          <p className={overview.lifetimePnl < 0 ? "pnl-negative" : "pnl-positive"}>
+            {formatUsd(overview.lifetimePnl)} ({formatPct(overview.lifetimePnlPct)})
+          </p>
+          <p className="muted">Vs your paper starting balance</p>
+        </article>
+        <article className="account-stat">
+          <h3>{overview.dayLabel}</h3>
+          <p className={overview.dayPnl < 0 ? "pnl-negative" : "pnl-positive"}>
+            {formatUsd(overview.dayPnl)} ({formatPct(overview.dayPnlPct)})
+          </p>
+          <p className="muted">Since yesterday&apos;s close</p>
+        </article>
+        <article className="account-stat">
+          <h3>Cash</h3>
+          <p>{formatUsd(overview.cash)}</p>
+        </article>
+        <article className="account-stat">
+          <h3>In the market (ETFs)</h3>
+          <p>{formatUsd(overview.inMarket)}</p>
+        </article>
+        <article className="account-stat">
+          <h3>Open positions</h3>
+          <p>{overview.openPositions}</p>
+        </article>
+        <article className="account-stat">
+          <h3>Realized P&amp;L (tracked sells)</h3>
+          <p className={overview.realizedPnlTracked < 0 ? "pnl-negative" : "pnl-positive"}>
+            {formatUsd(overview.realizedPnlTracked)}
+          </p>
+          <p className="muted">Sum of closed trades recorded by KnoweTrade</p>
+        </article>
+      </div>
+    </div>
+  );
+}
+
 export function TickerList({ label, tickers, emptyLabel }: TickerListProps) {
   return (
     <article className="intent-block">

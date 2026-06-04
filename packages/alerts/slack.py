@@ -7,6 +7,8 @@ from typing import Any
 
 import httpx
 
+from packages.core.trade_pnl import format_realized_pnl_pct, format_realized_pnl_usd
+
 logger = logging.getLogger("knowetrade.alerts")
 
 
@@ -62,14 +64,31 @@ def sendWarningAlert(title: str, details: str) -> None:
     _post_to_slack(text=text)
 
 
-def sendTradeAlert(*, symbol: str, side: str, qty: int, broker_order_id: str | None = None) -> None:
+def sendTradeAlert(
+    *,
+    symbol: str,
+    side: str,
+    qty: int,
+    broker_order_id: str | None = None,
+    fill_price: float | None = None,
+    cost_basis: float | None = None,
+    realized_pnl_usd: float | None = None,
+    realized_pnl_pct: float | None = None,
+) -> None:
     """Notify Slack when an order is submitted to the broker."""
     if not is_trading_weekday_utc():
         logger.info("slack.trade_skipped reason=non_trading_day symbol=%s side=%s", symbol, side)
         return
     order_ref = f" order_id={broker_order_id}" if broker_order_id else ""
     emoji = ":chart_with_upwards_trend:" if side.lower() == "buy" else ":chart_with_downwards_trend:"
-    text = f"{emoji} *Trade executed* — {side.upper()} {qty} {symbol.upper()}{order_ref}"
+    lines = [f"{emoji} *Trade executed* — {side.upper()} {qty} {symbol.upper()}{order_ref}"]
+    if side.lower() == "sell" and fill_price is not None and fill_price > 0:
+        lines.append(f"Sale ${fill_price:,.2f}/share")
+        if cost_basis is not None and cost_basis > 0:
+            lines.append(f"Cost ${cost_basis:,.2f}/share")
+        if realized_pnl_usd is not None and realized_pnl_pct is not None:
+            lines.append(f"P&L {format_realized_pnl_usd(realized_pnl_usd)} ({format_realized_pnl_pct(realized_pnl_pct)})")
+    text = "\n".join(lines)
     _post_to_slack(text=text)
 
 

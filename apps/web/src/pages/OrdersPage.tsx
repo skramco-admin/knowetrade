@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { getOrders, type Order } from "../api";
-import { formatDateTime } from "../format";
+import { formatDateTime, formatOrderPnl, formatUsd } from "../format";
 
 function orderSubmittedAt(order: Order): string {
   return formatDateTime(order.submitted_at ?? order.created_at);
@@ -33,6 +33,8 @@ export function OrdersPage() {
             <th>Side</th>
             <th>Qty</th>
             <th>Status</th>
+            <th>Realized P&amp;L</th>
+            <th>Fill price</th>
             <th>Submitted</th>
             <th>Filled / updated</th>
           </tr>
@@ -45,6 +47,18 @@ export function OrdersPage() {
               <td>{order.side}</td>
               <td>{order.qty}</td>
               <td>{order.status}</td>
+              <td
+                className={
+                  order.realized_pnl_usd === undefined
+                    ? ""
+                    : order.realized_pnl_usd < 0
+                      ? "pnl-negative"
+                      : "pnl-positive"
+                }
+              >
+                {formatOrderPnl(order)}
+              </td>
+              <td>{order.filled_avg_price !== undefined ? formatUsd(order.filled_avg_price) : "—"}</td>
               <td>{orderSubmittedAt(order)}</td>
               <td>{orderActivityAt(order)}</td>
             </tr>

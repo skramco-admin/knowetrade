@@ -20,6 +20,7 @@ from packages.core.rotation import (
     rotation_reason,
 )
 from packages.core.signals import calculate_trend_signal, rules_for_appetite
+from packages.core.trade_pnl import compute_realized_sell_pnl
 from packages.broker_alpaca.client import (
     AlpacaBrokerClient,
     BrokerAuthError,
@@ -27,6 +28,7 @@ from packages.broker_alpaca.client import (
     OrderRequest,
 )
 from packages.db.helpers import (
+    get_position_avg_price,
     get_setting_bool,
     init_database,
     list_active_etf_symbols,
@@ -38,6 +40,7 @@ from packages.db.helpers import (
     record_fill,
     log_job_run,
     record_proposed_order,
+    record_risk_event,
     record_signal,
     list_position_qty_by_symbols,
     upsert_price_bar,
@@ -349,6 +352,58 @@ def _broker_long_symbols(broker: AlpacaBrokerClient, monitored: set[str]) -> set
     }
 
 
+def _record_reconcile_mismatch(
+    *,
+    job_name: str,
+    missing_in_broker: list[str],
+    unexpected_in_broker: list[str],
+    missing_open_orders: list[str] | None = None,
+    unexpected_open_orders: list[str] | None = None,
+) -> None:
+    missing_open_orders = missing_open_orders or []
+    unexpected_open_orders = unexpected_open_orders or []
+    if not (missing_in_broker or unexpected_in_broker or missing_open_orders or unexpected_open_orders):
+        return
+
+    parts: list[str] = []
+    if missing_in_broker:
+        parts.append(f"missing at broker: {', '.join(missing_in_broker)}")
+    if unexpected_in_broker:
+        parts.append(f"unexpected at broker: {', '.join(unexpected_in_broker)}")
+    if missing_open_orders:
+        parts.append(f"missing open orders: {', '.join(missing_open_orders)}")
+    if unexpected_open_orders:
+        parts.append(f"unexpected open orders: {', '.join(unexpected_open_orders)}")
+
+    symbol = None
+    if len(unexpected_in_broker) == 1:
+        symbol = unexpected_in_broker[0]
+    elif len(missing_in_broker) == 1:
+        symbol = missing_in_broker[0]
+
+    record_risk_event(
+        f"Reconcile mismatch — {'; '.join(parts)}",
+        symbol=symbol,
+        severity="warning",
+        details={
+            "job": job_name,
+            "missing_in_broker": missing_in_broker,
+            "unexpected_in_broker": unexpected_in_broker,
+            "missing_open_orders": missing_open_orders,
+            "unexpected_open_orders": unexpected_open_orders,
+        },
+    )
+
+
+def _resolve_sell_cost_basis(symbol: str, broker_avg_by_symbol: dict[str, float]) -> float:
+    symbol_key = symbol.upper()
+    broker_avg = broker_avg_by_symbol.get(symbol_key, 0.0)
+    if broker_avg > 0:
+        return broker_avg
+    local_avg = get_position_avg_price(symbol_key)
+    return local_avg or 0.0
+
+
 def _combined_long_symbols(symbols: list[str], broker: AlpacaBrokerClient | None = None) -> set[str]:
     monitored = _monitored_symbol_set(symbols)
     held = _local_long_symbols(symbols)
@@ -458,6 +513,11 @@ def run_once() -> None:
             raise
 
         broker_qty_by_symbol = {position.symbol: position.qty for position in broker_positions if position.qty > 0}
+        broker_avg_by_symbol = {
+            position.symbol: position.avg_entry_price
+            for position in broker_positions
+            if position.avg_entry_price > 0
+        }
         broker_long_set = {symbol for symbol, qty in broker_qty_by_symbol.items() if qty > 0}
         monitored = _monitored_symbol_set(symbols)
         intended_long_set = set(enter_symbols + hold_symbols)
@@ -542,9 +602,22 @@ def run_once() -> None:
                 qty = int(abs(broker_qty_by_symbol.get(symbol, 0)))
                 if qty <= 0:
                     continue
+                cost_basis = _resolve_sell_cost_basis(symbol, broker_avg_by_symbol)
                 request = OrderRequest(symbol=symbol, qty=qty, side="sell")
                 try:
                     order = broker.submit_paper_order(request)
+                    filled_qty = float(order.get("filled_qty") or 0)
+                    filled_avg_price = float(order.get("filled_avg_price") or 0)
+                    trade_qty = filled_qty if filled_qty > 0 else float(qty)
+                    pnl_result = None
+                    if trade_qty > 0 and filled_avg_price > 0 and cost_basis > 0:
+                        pnl_result = compute_realized_sell_pnl(
+                            qty=trade_qty,
+                            sell_price=filled_avg_price,
+                            cost_basis=cost_basis,
+                        )
+                    realized_pnl_usd = pnl_result[0] if pnl_result else None
+                    realized_pnl_pct = pnl_result[1] if pnl_result else None
                     local_order_id = record_broker_order(
                         broker_order_id=str(order.get("id", "")),
                         symbol=symbol,
@@ -554,9 +627,11 @@ def run_once() -> None:
                         status=str(order.get("status", "accepted")),
                         submitted_at=_parse_dt(order.get("submitted_at")),
                         filled_at=_parse_dt(order.get("filled_at")),
+                        filled_avg_price=filled_avg_price if filled_avg_price > 0 else None,
+                        cost_basis_avg=cost_basis if cost_basis > 0 else None,
+                        realized_pnl_usd=realized_pnl_usd,
+                        realized_pnl_pct=realized_pnl_pct,
                     )
-                    filled_qty = float(order.get("filled_qty") or 0)
-                    filled_avg_price = float(order.get("filled_avg_price") or 0)
                     if filled_qty > 0 and filled_avg_price > 0:
                         record_fill(
                             order_id=local_order_id,
@@ -571,6 +646,10 @@ def run_once() -> None:
                         side="sell",
                         qty=request.qty,
                         broker_order_id=str(order.get("id", "")) or None,
+                        fill_price=filled_avg_price if filled_avg_price > 0 else None,
+                        cost_basis=cost_basis if cost_basis > 0 else None,
+                        realized_pnl_usd=realized_pnl_usd,
+                        realized_pnl_pct=realized_pnl_pct,
                     )
                 except OrderRejectedError as exc:
                     rejected_count += 1
@@ -593,6 +672,11 @@ def run_once() -> None:
         missing_open_orders = sorted(expected_open_symbols - broker_open_symbols)
         unexpected_open_orders = sorted(broker_open_symbols - expected_open_symbols)
         if missing_in_broker or unexpected_in_broker:
+            _record_reconcile_mismatch(
+                job_name=job_name,
+                missing_in_broker=missing_in_broker,
+                unexpected_in_broker=unexpected_in_broker,
+            )
             sendWarningAlert(
                 "Reconcile mismatch",
                 f"missing_in_broker={','.join(missing_in_broker)} unexpected_in_broker={','.join(unexpected_in_broker)}",
@@ -603,6 +687,13 @@ def run_once() -> None:
                 ",".join(unexpected_in_broker),
             )
         elif missing_open_orders or unexpected_open_orders:
+            _record_reconcile_mismatch(
+                job_name=job_name,
+                missing_in_broker=[],
+                unexpected_in_broker=[],
+                missing_open_orders=missing_open_orders,
+                unexpected_open_orders=unexpected_open_orders,
+            )
             sendWarningAlert(
                 "Reconcile mismatch",
                 f"missing_open_orders={','.join(missing_open_orders)} unexpected_open_orders={','.join(unexpected_open_orders)}",
@@ -675,6 +766,11 @@ def run_once() -> None:
         if missing_in_broker or unexpected_in_broker:
             failed_count = 1
             status = "completed_with_errors"
+            _record_reconcile_mismatch(
+                job_name=job_name,
+                missing_in_broker=missing_in_broker,
+                unexpected_in_broker=unexpected_in_broker,
+            )
             sendWarningAlert(
                 "Reconcile mismatch",
                 f"missing_in_broker={','.join(missing_in_broker) or 'none'} "

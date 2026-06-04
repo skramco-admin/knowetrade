@@ -1,6 +1,6 @@
-import type { AccountMetrics, JobRun, Order, ProposedOrder, RiskEvent, SystemHealth } from "./api";
+import type { AccountMetrics, JobRun, Order, Position, ProposedOrder, RiskEvent, SystemHealth } from "./api";
 import { EXECUTION_JOB_NAMES, friendlyJobName, STRATEGY_JOB_NAMES } from "./jobs";
-import { formatRelativeTime, isTodayUtc, isTradingWeekdayUtc, parseIso, startOfUtcDay } from "./format";
+import { formatOrderPnl, formatRelativeTime, isTodayUtc, isTradingWeekdayUtc, parseIso, startOfUtcDay } from "./format";
 
 export type StatusLevel = "ok" | "warn" | "bad";
 export type AlertSeverity = StatusLevel | "info";
@@ -45,6 +45,64 @@ export type PortfolioIntent = {
   wantToSell: string[];
 };
 
+export type AccountOverview = {
+  totalValue: number;
+  cash: number;
+  inMarket: number;
+  openPositions: number;
+  startingEquity: number;
+  dayPnl: number;
+  dayPnlPct: number;
+  lifetimePnl: number;
+  lifetimePnlPct: number;
+  realizedPnlTracked: number;
+  overallStatus: StatusLevel;
+  overallLabel: string;
+  dayStatus: StatusLevel;
+  dayLabel: string;
+};
+
+export function buildAccountOverview(
+  account: AccountMetrics | null,
+  positions: Position[],
+  orders: Order[],
+): AccountOverview | null {
+  if (!account) {
+    return null;
+  }
+
+  const realizedPnlTracked = orders
+    .filter((order) => order.side.toLowerCase() === "sell" && order.realized_pnl_usd !== undefined)
+    .reduce((sum, order) => sum + (order.realized_pnl_usd ?? 0), 0);
+
+  const lifetimePnl = account.lifetime_pnl ?? account.equity - (account.starting_equity ?? 100_000);
+  const lifetimePnlPct =
+    account.lifetime_pnl_pct ??
+    (account.starting_equity > 0 ? lifetimePnl / account.starting_equity : 0);
+  const dayPnl = account.day_pnl ?? 0;
+  const dayPnlPct = account.day_pnl_pct ?? 0;
+
+  const overallStatus: StatusLevel = lifetimePnl > 0 ? "ok" : lifetimePnl < 0 ? "bad" : "warn";
+  const dayStatus: StatusLevel = dayPnl > 0 ? "ok" : dayPnl < 0 ? "bad" : "warn";
+
+  return {
+    totalValue: account.equity,
+    cash: account.cash,
+    inMarket: account.long_market_value ?? Math.max(account.equity - account.cash, 0),
+    openPositions: positions.filter((position) => position.qty > 0).length,
+    startingEquity: account.starting_equity ?? 100_000,
+    dayPnl,
+    dayPnlPct,
+    lifetimePnl,
+    lifetimePnlPct,
+    realizedPnlTracked,
+    overallStatus,
+    overallLabel: lifetimePnl > 0 ? "Account up overall" : lifetimePnl < 0 ? "Account down overall" : "Flat overall",
+    dayStatus,
+    dayLabel: dayPnl > 0 ? "Up today" : dayPnl < 0 ? "Down today" : "Flat today",
+  };
+}
+
 export type GlanceSummary = {
   overallStatus: StatusLevel;
   overallLabel: string;
@@ -65,6 +123,59 @@ export function latestProposedBySymbol(rows: ProposedOrder[]): ProposedOrder[] {
     }
   }
   return [...bySymbol.values()].sort((a, b) => a.symbol.localeCompare(b.symbol));
+}
+
+export function buildRiskWatchItems(
+  positions: Position[],
+  proposed: ProposedOrder[],
+  riskEvents: RiskEvent[],
+): Alert[] {
+  const items: Alert[] = [];
+  const latest = latestProposedBySymbol(proposed);
+  const intended = new Set(latest.filter((row) => row.action === "ENTER" || row.action === "HOLD").map((row) => row.symbol));
+  const heldSymbols = positions.filter((position) => position.qty > 0).map((position) => position.symbol.toUpperCase());
+  const orphanHeld = heldSymbols.filter((symbol) => latest.length > 0 && !intended.has(symbol));
+
+  if (orphanHeld.length > 0) {
+    items.push({
+      severity: "warn",
+      message: `Positions not in target portfolio: ${orphanHeld.join(", ")}`,
+      detail: "Bot may propose EXIT on the next strategy cycle.",
+    });
+  }
+
+  const latestMismatch = riskEvents.find(
+    (event) =>
+      event.reason.toLowerCase().includes("reconcile") || event.reason.toLowerCase().includes("mismatch"),
+  );
+  if (latestMismatch) {
+    items.push({
+      severity: latestMismatch.severity === "critical" ? "bad" : "warn",
+      message: latestMismatch.reason,
+      detail: latestMismatch.symbol ? `Symbol: ${latestMismatch.symbol}` : "Portfolio-wide issue",
+    });
+  }
+
+  if (items.length === 0) {
+    items.push({
+      severity: "ok",
+      message: "No active risk issues detected right now.",
+      detail: "New warnings appear here after reconciliation or broker mismatches.",
+    });
+  }
+
+  return items;
+}
+
+export function riskSeverityLevel(severity: string): StatusLevel {
+  const normalized = severity.toLowerCase();
+  if (normalized === "critical" || normalized === "error") {
+    return "bad";
+  }
+  if (normalized === "warning" || normalized === "warn") {
+    return "warn";
+  }
+  return "ok";
 }
 
 export function buildPortfolioIntent(proposed: ProposedOrder[]): PortfolioIntent {
@@ -337,11 +448,13 @@ export function buildActivityTimeline(jobRuns: JobRun[], orders: Order[], limit 
     }
     const side = order.side.toUpperCase();
     const status: StatusLevel = order.status === "filled" ? "ok" : order.status === "rejected" ? "bad" : "warn";
+    const pnlLabel = formatOrderPnl(order);
+    const pnlSuffix = pnlLabel !== "—" ? ` · P&L ${pnlLabel}` : "";
     items.push({
       at,
       kind: "order",
       status,
-      message: `${side} ${order.qty} ${order.symbol} — ${order.status}`,
+      message: `${side} ${order.qty} ${order.symbol} — ${order.status}${pnlSuffix}`,
     });
   }
 

@@ -9,8 +9,16 @@ import {
   getSystemHealth,
   type AccountMetrics,
 } from "../api";
-import { ActivityTimeline, AlertList, HealthCheckList, StatusPill, TickerList } from "../components/OperatorUi";
 import {
+  AccountOverviewPanel,
+  ActivityTimeline,
+  AlertList,
+  HealthCheckList,
+  StatusPill,
+  TickerList,
+} from "../components/OperatorUi";
+import {
+  buildAccountOverview,
   buildActivityTimeline,
   buildAlerts,
   buildGlanceSummary,
@@ -86,6 +94,10 @@ export function DashboardPage() {
   }, []);
 
   const nextCron = cronCountdowns[0];
+  const accountOverview = useMemo(
+    () => buildAccountOverview(account, positions, orders),
+    [account, positions, orders],
+  );
   const portfolio = useMemo(() => buildPortfolioIntent(proposed), [proposed]);
   const todayStats = useMemo(() => buildTodayStats(jobRuns, proposed, orders), [jobRuns, proposed, orders]);
   const healthChecks = useMemo(
@@ -110,11 +122,20 @@ export function DashboardPage() {
     [alerts, healthChecks, jobRuns, todayStats, account, nextCron],
   );
 
-  const pnl = account?.day_pnl;
-  const pnlLabel = pnl === undefined ? "Today" : pnl >= 0 ? "Up today" : "Down today";
+  const pnlLabel = accountOverview?.dayLabel ?? "Today";
 
   return (
     <section className="dashboard">
+      <div className="card account-card">
+        <h2>Your trading account</h2>
+        <p className="muted">Full account picture from Alpaca paper trading (not just today).</p>
+        {accountOverview ? (
+          <AccountOverviewPanel overview={accountOverview} formatUsd={formatUsd} formatPct={formatPct} />
+        ) : (
+          <p className="muted">{loading ? "Loading account…" : "Account metrics unavailable."}</p>
+        )}
+      </div>
+
       <div className="card glance-card">
         <div className="glance-head">
           <div>
@@ -209,28 +230,6 @@ export function DashboardPage() {
       <div className="card">
         <h2>Last 24 hours</h2>
         <ActivityTimeline items={timeline} />
-      </div>
-
-      <div className="card">
-        <h2>Portfolio snapshot</h2>
-        <div className="grid">
-          <article className="metric">
-            <h3>Active positions</h3>
-            <p>{positions.length}</p>
-          </article>
-          <article className="metric">
-            <h3>Portfolio equity</h3>
-            <p>{formatUsd(account?.equity)}</p>
-          </article>
-          <article className="metric">
-            <h3>Cash</h3>
-            <p>{formatUsd(account?.cash)}</p>
-          </article>
-          <article className="metric">
-            <h3>Buying power</h3>
-            <p>{formatUsd(account?.buying_power)}</p>
-          </article>
-        </div>
       </div>
 
       <div className="card">

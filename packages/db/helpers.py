@@ -34,6 +34,7 @@ def init_database() -> None:
     _ensure_signals_schema_compat()
     _ensure_proposed_orders_schema_compat()
     _ensure_orders_schema_compat()
+    _ensure_risk_events_schema_compat()
     _ensure_settings_audit_schema_compat()
 
 
@@ -220,6 +221,14 @@ def _ensure_orders_schema_compat() -> None:
             statements.append("alter table orders add column updated_at datetime")
         else:
             statements.append("alter table orders add column updated_at timestamptz")
+    if "filled_avg_price" not in columns:
+        statements.append("alter table orders add column filled_avg_price float")
+    if "cost_basis_avg" not in columns:
+        statements.append("alter table orders add column cost_basis_avg float")
+    if "realized_pnl_usd" not in columns:
+        statements.append("alter table orders add column realized_pnl_usd float")
+    if "realized_pnl_pct" not in columns:
+        statements.append("alter table orders add column realized_pnl_pct float")
 
     if statements:
         with ENGINE.begin() as connection:
@@ -288,6 +297,58 @@ def _ensure_orders_schema_compat() -> None:
                     set
                       symbol = coalesce(symbol, ''),
                       fill_time = coalesce(fill_time, created_at, now())
+                    """
+                )
+            )
+
+
+def _ensure_risk_events_schema_compat() -> None:
+    inspector = inspect(ENGINE)
+    tables = inspector.get_table_names()
+    if "risk_events" not in tables:
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("risk_events")}
+    dialect = ENGINE.dialect.name
+    statements: list[str] = []
+    if "severity" not in columns:
+        statements.append("alter table risk_events add column severity text")
+    if "event_time" not in columns:
+        if dialect == "sqlite":
+            statements.append("alter table risk_events add column event_time datetime")
+        else:
+            statements.append("alter table risk_events add column event_time timestamptz")
+    if "details" not in columns:
+        if dialect == "sqlite":
+            statements.append("alter table risk_events add column details text")
+        else:
+            statements.append("alter table risk_events add column details jsonb")
+
+    if not statements:
+        return
+
+    with ENGINE.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+        if dialect == "sqlite":
+            connection.execute(
+                text(
+                    """
+                    update risk_events
+                    set
+                      severity = coalesce(severity, 'warning'),
+                      event_time = coalesce(event_time, created_at, datetime('now'))
+                    """
+                )
+            )
+        else:
+            connection.execute(
+                text(
+                    """
+                    update risk_events
+                    set
+                      severity = coalesce(severity, 'warning'),
+                      event_time = coalesce(event_time, created_at, now())
                     """
                 )
             )
@@ -651,7 +712,11 @@ def list_risk_events(limit: int = 200) -> list[dict[str, Any]]:
             {
                 "id": row.id,
                 "symbol": row.symbol,
+                "severity": row.severity,
                 "reason": row.reason,
+                "event_time": (row.event_time or row.created_at).isoformat()
+                if (row.event_time or row.created_at)
+                else None,
                 "created_at": row.created_at.isoformat() if row.created_at else None,
             }
             for row in rows
@@ -710,11 +775,24 @@ def list_orders(limit: int = 500) -> list[dict[str, Any]]:
                 "status": row.status,
                 "submitted_at": row.submitted_at.isoformat() if row.submitted_at else None,
                 "filled_at": row.filled_at.isoformat() if row.filled_at else None,
+                "filled_avg_price": float(row.filled_avg_price) if row.filled_avg_price is not None else None,
+                "cost_basis_avg": float(row.cost_basis_avg) if row.cost_basis_avg is not None else None,
+                "realized_pnl_usd": float(row.realized_pnl_usd) if row.realized_pnl_usd is not None else None,
+                "realized_pnl_pct": float(row.realized_pnl_pct) if row.realized_pnl_pct is not None else None,
                 "updated_at": row.updated_at.isoformat() if row.updated_at else None,
                 "created_at": row.created_at.isoformat() if row.created_at else None,
             }
             for row in rows
         ]
+
+
+def get_position_avg_price(symbol: str) -> float | None:
+    init_database()
+    with db_session() as session:
+        row = session.execute(select(Position).where(Position.symbol == symbol.upper())).scalar_one_or_none()
+        if row is None or float(row.qty) <= 0 or float(row.avg_price) <= 0:
+            return None
+        return float(row.avg_price)
 
 
 def record_broker_order(
@@ -727,6 +805,10 @@ def record_broker_order(
     status: str,
     submitted_at: datetime | None,
     filled_at: datetime | None,
+    filled_avg_price: float | None = None,
+    cost_basis_avg: float | None = None,
+    realized_pnl_usd: float | None = None,
+    realized_pnl_pct: float | None = None,
 ) -> int:
     init_database()
     with db_session() as session:
@@ -741,6 +823,10 @@ def record_broker_order(
                 status=status.lower(),
                 submitted_at=submitted_at or datetime.now(timezone.utc),
                 filled_at=filled_at,
+                filled_avg_price=filled_avg_price,
+                cost_basis_avg=cost_basis_avg,
+                realized_pnl_usd=realized_pnl_usd,
+                realized_pnl_pct=realized_pnl_pct,
                 updated_at=datetime.now(timezone.utc),
             )
             session.add(order)
@@ -754,6 +840,14 @@ def record_broker_order(
         existing.status = status.lower()
         existing.submitted_at = submitted_at or existing.submitted_at
         existing.filled_at = filled_at
+        if filled_avg_price is not None:
+            existing.filled_avg_price = filled_avg_price
+        if cost_basis_avg is not None:
+            existing.cost_basis_avg = cost_basis_avg
+        if realized_pnl_usd is not None:
+            existing.realized_pnl_usd = realized_pnl_usd
+        if realized_pnl_pct is not None:
+            existing.realized_pnl_pct = realized_pnl_pct
         existing.updated_at = datetime.now(timezone.utc)
         session.flush()
         return int(existing.id)
@@ -811,10 +905,24 @@ def log_job_run(job_name: str, status: str, started_at: datetime) -> None:
         )
 
 
-def record_risk_event(symbol: str, reason: str) -> None:
+def record_risk_event(
+    reason: str,
+    *,
+    symbol: str | None = None,
+    severity: str = "warning",
+    details: dict[str, Any] | None = None,
+) -> None:
     init_database()
     with db_session() as session:
-        session.add(RiskEvent(symbol=symbol, reason=reason))
+        session.add(
+            RiskEvent(
+                symbol=symbol.upper() if symbol else None,
+                severity=severity.strip().lower(),
+                reason=reason,
+                details=details,
+                event_time=datetime.now(timezone.utc),
+            )
+        )
 
 
 def record_order_and_position(order_id: str, symbol: str, qty: int) -> None:
