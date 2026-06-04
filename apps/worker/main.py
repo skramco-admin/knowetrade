@@ -13,6 +13,7 @@ from packages.alerts.slack import (
     sendTradeAlert,
     sendWarningAlert,
 )
+from packages.core.position_sizing import compute_target_buy_qty, normalize_order_sizing_mode
 from packages.core.risk import resolve_risk_limits
 from packages.core.rotation import (
     build_rotation_decision,
@@ -188,6 +189,73 @@ def _order_submission_enabled() -> bool:
 
 def _paper_order_qty() -> int:
     return _risk_limits().paper_order_qty
+
+
+def _order_sizing_mode() -> str:
+    return normalize_order_sizing_mode(os.getenv("ORDER_SIZING_MODE"))
+
+
+def _resolve_reference_price(broker: AlpacaBrokerClient, symbol: str) -> float | None:
+    try:
+        bar = broker.get_latest_daily_bar(symbol)
+        if bar is not None and bar.close > 0:
+            return float(bar.close)
+    except Exception as exc:
+        logger.warning("order.price_lookup_failed symbol=%s reason=%s", symbol, exc)
+    return None
+
+
+def _resolve_buy_qty(
+    *,
+    broker: AlpacaBrokerClient,
+    symbol: str,
+    proposal_weight: float,
+    current_qty: float,
+    equity: float,
+    cash: float,
+) -> int | None:
+    limits = _risk_limits()
+    if _order_sizing_mode() == "fixed_qty":
+        return _paper_order_qty()
+
+    price = _resolve_reference_price(broker, symbol)
+    if price is None:
+        logger.warning("order.skipped symbol=%s reason=missing_reference_price", symbol)
+        return None
+
+    qty = compute_target_buy_qty(
+        equity=equity,
+        cash=cash,
+        target_weight=proposal_weight,
+        price=price,
+        current_qty=current_qty,
+        max_position_pct=limits.max_position_pct,
+        max_position_notional_usd=limits.max_position_notional_usd,
+    )
+    if qty < 1:
+        logger.info(
+            "order.skipped symbol=%s reason=zero_target_qty equity=%.2f target_weight=%.4f price=%.4f current_qty=%.4f cash=%.2f",
+            symbol,
+            equity,
+            proposal_weight,
+            price,
+            current_qty,
+            cash,
+        )
+        return None
+
+    logger.info(
+        "order.sized symbol=%s mode=%s equity=%.2f target_weight=%.4f price=%.4f current_qty=%.4f qty=%s notional=%.2f",
+        symbol,
+        _order_sizing_mode(),
+        equity,
+        proposal_weight,
+        price,
+        current_qty,
+        qty,
+        qty * price,
+    )
+    return qty
 
 
 def _portfolio_strategy() -> str:
@@ -541,12 +609,18 @@ def run_once() -> None:
         max_position_pct = _max_position_pct()
         submitted_count = 0
         rejected_count = 0
-        order_qty = _paper_order_qty()
 
         if submission_enabled:
             broker.ensure_paper_trading()
+            account = broker.get_account_metrics()
+            equity = float(account.get("equity", 0) or 0)
+            cash = float(account.get("cash", 0) or 0)
+            if equity <= 0:
+                logger.warning("order.skipped reason=missing_account_equity")
             current_long_count = len([symbol for symbol, qty in broker_qty_by_symbol.items() if qty > 0])
             for symbol in enter_symbols:
+                if equity <= 0:
+                    break
                 proposal = proposal_by_symbol.get(symbol, {})
                 proposal_weight = float(proposal.get("target_weight", 0.0))
                 if proposal_weight > max_position_pct:
@@ -563,6 +637,17 @@ def run_once() -> None:
                         symbol,
                         max_open_positions,
                     )
+                    continue
+                current_qty = float(broker_qty_by_symbol.get(symbol, 0) or 0)
+                order_qty = _resolve_buy_qty(
+                    broker=broker,
+                    symbol=symbol,
+                    proposal_weight=proposal_weight,
+                    current_qty=current_qty,
+                    equity=equity,
+                    cash=cash,
+                )
+                if order_qty is None or order_qty < 1:
                     continue
                 request = OrderRequest(symbol=symbol, qty=order_qty, side="buy")
                 try:
@@ -587,8 +672,10 @@ def run_once() -> None:
                             fill_price=filled_avg_price,
                             fill_time=_parse_dt(order.get("filled_at")),
                         )
+                        cash = max(0.0, cash - (filled_qty * filled_avg_price))
                     submitted_count += 1
                     current_long_count += 1
+                    broker_qty_by_symbol[symbol] = current_qty + float(order.get("qty", order_qty))
                     sendTradeAlert(
                         symbol=symbol,
                         side="buy",
@@ -720,6 +807,7 @@ def run_once() -> None:
                 f"submitted={submitted_count}",
                 f"rejected={rejected_count}",
                 f"submission_enabled={submission_enabled}",
+                f"order_sizing_mode={_order_sizing_mode()}",
                 f"app_mode={app_mode}",
                 f"trading_enabled={trading_enabled}",
             ]

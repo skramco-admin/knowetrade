@@ -136,7 +136,8 @@ Render cron wiring is defined in `infra/render.yaml`.
 - `MOMENTUM_LOOKBACK_DAYS` (default `20`)
 - `MAX_OPEN_POSITIONS` (default from appetite; `ultra_aggressive` uses `20`)
 - `MAX_POSITION_PCT` (default from appetite; `ultra_aggressive` uses `0.30`)
-- `PAPER_ORDER_QTY` (default from appetite; `ultra_aggressive` uses `5`)
+- `ORDER_SIZING_MODE` (`equity_weighted` default sizes buys from account equity × proposal `target_weight`; `fixed_qty` uses `PAPER_ORDER_QTY`)
+- `PAPER_ORDER_QTY` (used when `ORDER_SIZING_MODE=fixed_qty`; `ultra_aggressive` preset is `5`)
 - `MAX_POSITION_NOTIONAL_USD` (default from appetite; `ultra_aggressive` uses `50000`)
 - `LOG_LEVEL`
 

@@ -97,6 +97,8 @@ services:
         value: momentum_rotation
       - key: MOMENTUM_LOOKBACK_DAYS
         value: "20"
+      - key: ORDER_SIZING_MODE
+        value: equity_weighted
       - key: MAX_OPEN_POSITIONS
         value: "20"
       - key: MAX_PORTFOLIO_POSITIONS
@@ -146,6 +148,8 @@ services:
         value: momentum_rotation
       - key: MOMENTUM_LOOKBACK_DAYS
         value: "20"
+      - key: ORDER_SIZING_MODE
+        value: equity_weighted
       - key: MAX_OPEN_POSITIONS
         value: "20"
       - key: MAX_PORTFOLIO_POSITIONS
@@ -195,6 +199,8 @@ services:
         value: momentum_rotation
       - key: MOMENTUM_LOOKBACK_DAYS
         value: "20"
+      - key: ORDER_SIZING_MODE
+        value: equity_weighted
       - key: MAX_OPEN_POSITIONS
         value: "20"
       - key: MAX_PORTFOLIO_POSITIONS
@@ -244,6 +250,8 @@ services:
         value: momentum_rotation
       - key: MOMENTUM_LOOKBACK_DAYS
         value: "20"
+      - key: ORDER_SIZING_MODE
+        value: equity_weighted
       - key: MAX_OPEN_POSITIONS
         value: "20"
       - key: MAX_PORTFOLIO_POSITIONS
@@ -291,6 +299,8 @@ services:
         value: momentum_rotation
       - key: MOMENTUM_LOOKBACK_DAYS
         value: "20"
+      - key: ORDER_SIZING_MODE
+        value: equity_weighted
       - key: MAX_OPEN_POSITIONS
         value: "20"
       - key: MAX_PORTFOLIO_POSITIONS
