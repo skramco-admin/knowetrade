@@ -319,13 +319,25 @@ export function buildAlerts(
     });
   }
 
-  const latestFailed = jobRuns.find((run) => isFailureStatus(run.status));
-  if (latestFailed && isTodayUtc(latestFailed.started_at ?? latestFailed.created_at)) {
-    alerts.push({
-      severity: "bad",
-      message: `Latest failed job: ${friendlyJobName(latestFailed.job_name)}.`,
-      detail: "Check Render logs for that cron or open Automation log below.",
-    });
+  const latestProblemRun = jobRuns.find((run) => isFailureStatus(run.status));
+  if (latestProblemRun && isTodayUtc(latestProblemRun.started_at ?? latestProblemRun.created_at)) {
+    const jobLabel = friendlyJobName(latestProblemRun.job_name);
+    if (
+      latestProblemRun.job_name === "daily_reconciliation" &&
+      latestProblemRun.status === "completed_with_errors"
+    ) {
+      alerts.push({
+        severity: "warn",
+        message: `Broker sync check found a mismatch — ${jobLabel}.`,
+        detail: "Alpaca holdings differ from what the strategy intends. Open the Risk tab for details; EXIT proposals or the next trade cycle usually fix this.",
+      });
+    } else {
+      alerts.push({
+        severity: "bad",
+        message: `Latest failed job: ${jobLabel}.`,
+        detail: "Check Render logs for that cron or open Automation log below.",
+      });
+    }
   }
 
   if (!health.enable_order_submission && (enterSymbols.length > 0 || latest.some((row) => row.action === "EXIT"))) {

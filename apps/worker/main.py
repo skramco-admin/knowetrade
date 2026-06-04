@@ -306,7 +306,7 @@ def _run_momentum_rotation_decisioning(symbols: list[str], job_name: str) -> dic
     momentum_by_symbol = {row.symbol: row.momentum for row in ranked}
 
     broker = AlpacaBrokerClient()
-    currently_held = _combined_long_symbols(symbols, broker=broker)
+    currently_held = _held_symbols_for_decisions(symbols, broker=broker)
     decision = build_rotation_decision(
         ranked=ranked,
         currently_held=currently_held,
@@ -356,7 +356,7 @@ def _run_trend_following_decisioning(symbols: list[str], job_name: str) -> dict[
     target_set = {row["symbol"] for row in buy_candidates[:max_positions]}
 
     broker = AlpacaBrokerClient()
-    currently_held = _combined_long_symbols(symbols, broker=broker)
+    currently_held = _held_symbols_for_decisions(symbols, broker=broker)
     entered = sorted(target_set - currently_held)
     held = sorted(target_set & currently_held)
     exited = sorted(currently_held - target_set)
@@ -470,6 +470,17 @@ def _resolve_sell_cost_basis(symbol: str, broker_avg_by_symbol: dict[str, float]
         return broker_avg
     local_avg = get_position_avg_price(symbol_key)
     return local_avg or 0.0
+
+
+def _held_symbols_for_decisions(symbols: list[str], broker: AlpacaBrokerClient | None = None) -> set[str]:
+    """Use Alpaca as source of truth when available; local DB can be stale."""
+    monitored = _monitored_symbol_set(symbols)
+    if broker is not None:
+        try:
+            return _broker_long_symbols(broker, monitored)
+        except BrokerAuthError as exc:
+            logger.warning("broker.positions_unavailable reason=%s", exc)
+    return _local_long_symbols(symbols)
 
 
 def _combined_long_symbols(symbols: list[str], broker: AlpacaBrokerClient | None = None) -> set[str]:
@@ -609,6 +620,7 @@ def run_once() -> None:
         max_position_pct = _max_position_pct()
         submitted_count = 0
         rejected_count = 0
+        buy_symbols = sorted(set(enter_symbols + hold_symbols))
 
         if submission_enabled:
             broker.ensure_paper_trading()
@@ -618,7 +630,7 @@ def run_once() -> None:
             if equity <= 0:
                 logger.warning("order.skipped reason=missing_account_equity")
             current_long_count = len([symbol for symbol, qty in broker_qty_by_symbol.items() if qty > 0])
-            for symbol in enter_symbols:
+            for symbol in buy_symbols:
                 if equity <= 0:
                     break
                 proposal = proposal_by_symbol.get(symbol, {})
@@ -688,6 +700,7 @@ def run_once() -> None:
             for symbol in exit_symbols:
                 qty = int(abs(broker_qty_by_symbol.get(symbol, 0)))
                 if qty <= 0:
+                    logger.info("order.skipped symbol=%s reason=no_broker_position_for_exit", symbol)
                     continue
                 cost_basis = _resolve_sell_cost_basis(symbol, broker_avg_by_symbol)
                 request = OrderRequest(symbol=symbol, qty=qty, side="sell")
@@ -801,7 +814,7 @@ def run_once() -> None:
             [
                 f"job={job_name}",
                 f"symbols_considered={len(considered_symbols)}",
-                f"buy_candidates={','.join(enter_symbols)}",
+                f"buy_candidates={','.join(buy_symbols)}",
                 f"exits={','.join(exit_symbols)}",
                 f"holds={','.join(hold_symbols)}",
                 f"submitted={submitted_count}",
