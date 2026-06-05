@@ -21,6 +21,44 @@ class OrderRejectedError(Exception):
     pass
 
 
+def _parse_alpaca_error_body(response: httpx.Response) -> tuple[str, int | None]:
+    try:
+        body = response.json()
+        if isinstance(body, dict):
+            message = str(body.get("message") or response.text or f"HTTP {response.status_code}")
+            raw_code = body.get("code")
+            if isinstance(raw_code, int):
+                return message, raw_code
+            if isinstance(raw_code, str) and raw_code.isdigit():
+                return message, int(raw_code)
+            return message, None
+    except Exception:
+        pass
+    return response.text or f"HTTP {response.status_code}", None
+
+
+def _raise_for_order_response(response: httpx.Response) -> None:
+    """Map Alpaca order POST failures to typed errors (403 is often a trading block, not auth)."""
+    message, code = _parse_alpaca_error_body(response)
+    status = response.status_code
+    logger.warning(
+        "broker.place_order.http_error status=%s code=%s message=%s",
+        status,
+        code,
+        message,
+    )
+    if status == 401:
+        raise BrokerAuthError(f"Alpaca order auth failure (status=401): {message}")
+    if status == 403:
+        if code is not None and code >= 40310000:
+            raise OrderRejectedError(f"Order rejected status=403 code={code} message={message}")
+        raise OrderRejectedError(f"Order rejected status=403 message={message}")
+    if 400 <= status < 500:
+        detail = f"code={code} message={message}" if code is not None else f"message={message}"
+        raise OrderRejectedError(f"Order rejected status={status} {detail}")
+    response.raise_for_status()
+
+
 @dataclass(frozen=True)
 class OrderRequest:
     symbol: str
@@ -166,11 +204,8 @@ class AlpacaBrokerClient:
             "time_in_force": "day",
         }
         response = httpx.post(f"{self.base_url}/v2/orders", json=payload, headers=self._auth_headers(), timeout=15)
-        if response.status_code in (401, 403):
-            raise BrokerAuthError(f"Alpaca order auth failure (status={response.status_code})")
-        if 400 <= response.status_code < 500:
-            raise OrderRejectedError(f"Order rejected status={response.status_code} body={response.text}")
-        response.raise_for_status()
+        if response.status_code >= 400:
+            _raise_for_order_response(response)
         body = response.json()
         logger.info("broker.place_order.success id=%s", body.get("id"))
         if body.get("status") in {"rejected", "canceled", "cancelled"}:

@@ -694,7 +694,7 @@ def run_once() -> None:
                         qty=request.qty,
                         broker_order_id=str(order.get("id", "")) or None,
                     )
-                except OrderRejectedError as exc:
+                except (OrderRejectedError, BrokerAuthError) as exc:
                     rejected_count += 1
                     logger.warning("order.rejected symbol=%s side=buy qty=%s reason=%s", symbol, request.qty, exc)
             for symbol in exit_symbols:
@@ -751,7 +751,7 @@ def run_once() -> None:
                         realized_pnl_usd=realized_pnl_usd,
                         realized_pnl_pct=realized_pnl_pct,
                     )
-                except OrderRejectedError as exc:
+                except (OrderRejectedError, BrokerAuthError) as exc:
                     rejected_count += 1
                     logger.warning("order.rejected symbol=%s side=sell qty=%s reason=%s", symbol, request.qty, exc)
         else:
